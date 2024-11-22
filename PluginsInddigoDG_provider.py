@@ -33,7 +33,6 @@ __revision__ = '$Format:%H$'
 from qgis.core import QgsProcessingProvider
 from .PluginsInddigoDG_algorithm import PluginsInddigoDGAlgorithm
 from .Arbre_de_rabattement.Arbre_de_rabattement_algorithm import ArbreDeRabattementAlgorithm
-from .Arbre_de_rabattement2.Arbre_de_rabattement_algorithm import ArbreDeRabattementAlgorithm
 
 
 class PluginsInddigoDGProvider(QgsProcessingProvider):

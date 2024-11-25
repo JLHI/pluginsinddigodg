@@ -132,7 +132,7 @@ class ArbreDeRabattementAlgorithm(QgsProcessingAlgorithm):
         Retourne le texte d'aide pour l'outil.
         """
         return """
-            <h3>Outil Arbre de Rabattement</h3>
+            <h3>Outil Inddigo : Arbre de Rabattement</h3>
             <p>Ce plugin permet de :</p>
             <ul>
                 <li>Exploser des lignes en segments individuels</li>

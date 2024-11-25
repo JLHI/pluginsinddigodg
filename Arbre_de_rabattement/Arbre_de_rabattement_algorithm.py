@@ -15,7 +15,7 @@ from qgis.PyQt.QtGui import QIcon
 import processing,os
 
 class ArbreDeRabattementAlgorithm(QgsProcessingAlgorithm):
-    """Aglo arbre de rabattement
+    """Algo arbre de rabattement
     """
     # Déclaration des paramètres
     ROUTES_LAYER = 'ROUTES_LAYER'

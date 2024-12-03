@@ -33,7 +33,7 @@ __revision__ = '$Format:%H$'
 from qgis.core import QgsProcessingProvider
 from .PluginsInddigoDG_algorithm import PluginsInddigoDGAlgorithm
 from .Arbre_de_rabattement.Arbre_de_rabattement_algorithm import ArbreDeRabattementAlgorithm
-
+from.gtfs_stops_to_routes_ign.gtfs_stops_to_route_ign import GtfsRouteIgn
 
 class PluginsInddigoDGProvider(QgsProcessingProvider):
 
@@ -57,6 +57,7 @@ class PluginsInddigoDGProvider(QgsProcessingProvider):
         #self.addAlgorithm(PluginsInddigoDGAlgorithm())
 
         self.addAlgorithm(ArbreDeRabattementAlgorithm())
+        self.addAlgorithm(GtfsRouteIgn())
 
 
         # add additional algorithms here

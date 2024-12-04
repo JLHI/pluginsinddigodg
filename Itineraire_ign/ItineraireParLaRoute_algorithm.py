@@ -311,3 +311,39 @@ class ItineraireParLaRouteAlgorithm(QgsProcessingAlgorithm):
 
     def createInstance(self):
         return ItineraireParLaRouteAlgorithm()
+    
+    def shortHelpString(self):
+        """
+        Retourne le texte d'aide pour l'outil.
+        """
+        return """
+            <h3>Outil Inddigo : Itinéraire par la route</h3>
+            <p>Ce plugin permet de calculer des itinéraires routiers entre des points de départ et d'arrivée
+            provenant de deux couches de points distinctes.</p>
+            <h4>Fonctionnalités principales :</h4>
+            <ul>
+                <li>Calcul des itinéraires entre deux couches de points via l'API IGN.</li>
+                <li>Option de filtrage par champs communs entre les deux couches.</li>
+                <li>Ajout d'un buffer optionnel pour limiter les calculs d'itinéraires aux entités proches.</li>
+                <li>Choix de conserver uniquement l'itinéraire avec la distance minimale pour chaque point de départ.</li>
+            </ul>
+            <h4>Paramètres :</h4>
+            <ul>
+                <li><b>Couche d’entrée 1 (Points de départ) :</b> La première couche de points utilisée comme points de départ.</li>
+                <li><b>Champ d’ID dans la couche 1 :</b> Champ identifiant les entités de la première couche.</li>
+                <li><b>Couche d’entrée 2 (Points d’arrivée) :</b> La deuxième couche de points utilisée comme points d’arrivée.</li>
+                <li><b>Champ d’ID dans la couche 2 :</b> Champ identifiant les entités de la deuxième couche.</li>
+                <li><b>Taille du buffer (optionnel) :</b> Taille du buffer pour limiter les calculs d’itinéraires.</li>
+                <li><b>Champs communs (optionnels) :</b> Champs à utiliser pour filtrer les points des deux couches.</li>
+                <li><b>Conserver uniquement la ligne avec la distance minimale :</b> Permet de n’exporter que l’itinéraire le plus court pour chaque point de départ.</li>
+                <li><b>Couche de sortie (Itinéraires) :</b> La couche résultante contenant les itinéraires calculés.</li>
+            </ul>
+            <h4>Résultats :</h4>
+            <p>Le plugin génère une couche contenant les itinéraires sous forme de lignes, avec les attributs suivants :</p>
+            <ul>
+                <li><b>id_input1 :</b> Identifiant de la couche 1 (point de départ).</li>
+                <li><b>id_input2 :</b> Identifiant de la couche 2 (point d’arrivée).</li>
+                <li><b>distance :</b> Distance de l’itinéraire en mètres.</li>
+                <li><b>duration :</b> Durée de l’itinéraire en secondes.</li>
+            </ul>
+        """

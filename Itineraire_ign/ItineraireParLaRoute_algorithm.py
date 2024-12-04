@@ -15,7 +15,7 @@ from qgis.core import (
     QgsCoordinateTransform,
     QgsCoordinateReferenceSystem,
     QgsProcessingParameterField,
-    QgsWkbTypes,QgsProcessingParameterBoolean
+    QgsWkbTypes,QgsProcessingParameterBoolean,QgsProcessingParameterDefinition
 )
 from qgis.PyQt.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
 from PyQt5.QtCore import QVariant, QUrl
@@ -72,31 +72,26 @@ class ItineraireParLaRouteAlgorithm(QgsProcessingAlgorithm):
             )
          )
         # Taille du buffer optionnel
-        self.addParameter(
-            QgsProcessingParameterNumber(
+        advanced_param_buffer = QgsProcessingParameterNumber(
                 self.BUFFER_SIZE,
                 self.tr('Taille du buffer (optionnel, en mètre)'),
                 defaultValue=0,
                 optional=True
             )
-        )
         # Champs communs pour filtrer les entités
-        self.addParameter(
-            QgsProcessingParameterField(
+        advanced_param_communfield_1 = QgsProcessingParameterField(
                 self.COMMON_FIELD1,
                 self.tr('Champ commun dans la couche 1'),
                 parentLayerParameterName=self.INPUT1,
                 optional=True
             )
-        )
-        self.addParameter(
-            QgsProcessingParameterField(
+        advanced_param_communfield_2 = QgsProcessingParameterField(
+
                 self.COMMON_FIELD2,
                 self.tr('Champ commun dans la couche 2'),
                 parentLayerParameterName=self.INPUT2,
                 optional=True
             )
-        )
 
         self.addParameter(
             QgsProcessingParameterBoolean(
@@ -105,7 +100,6 @@ class ItineraireParLaRouteAlgorithm(QgsProcessingAlgorithm):
                 defaultValue=False
             )
         )
-
         # Couche de sortie
         self.addParameter(
             QgsProcessingParameterFeatureSink(
@@ -113,6 +107,14 @@ class ItineraireParLaRouteAlgorithm(QgsProcessingAlgorithm):
                 self.tr('Couche de sortie (Itinéraires)')
             )
         )
+
+        advanced_param_buffer.setFlags(advanced_param_buffer.flags() | QgsProcessingParameterDefinition.FlagOptional | QgsProcessingParameterDefinition.FlagAdvanced)
+        advanced_param_communfield_1.setFlags(advanced_param_communfield_1.flags() | QgsProcessingParameterDefinition.FlagOptional | QgsProcessingParameterDefinition.FlagAdvanced)
+        advanced_param_communfield_2.setFlags(advanced_param_communfield_2.flags() | QgsProcessingParameterDefinition.FlagOptional | QgsProcessingParameterDefinition.FlagAdvanced)
+        self.addParameter(advanced_param_buffer)
+        self.addParameter(advanced_param_communfield_1)
+        self.addParameter(advanced_param_communfield_2)
+
 
     def processAlgorithm(self, parameters, context, feedback):
         """

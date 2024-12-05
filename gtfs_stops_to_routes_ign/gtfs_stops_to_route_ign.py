@@ -104,7 +104,7 @@ class GtfsRouteIgn(QgsProcessingAlgorithm):
             if xy_arrivee:
                 try:
                     api_url = (
-                        f"https://wxs.ign.fr/calcul/geoportail/itineraire/rest/1.0.0/route?"
+                        f"https://data.geopf.fr/navigation/itineraire?"
                         f"resource=bdtopo-osrm&profile=car&optimization=fastest"
                         f"&start={xy_depart[0]},{xy_depart[1]}"
                         f"&end={xy_arrivee[0]},{xy_arrivee[1]}"

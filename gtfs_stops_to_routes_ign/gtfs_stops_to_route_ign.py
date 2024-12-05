@@ -1,6 +1,5 @@
 import pandas as pd
 import requests
-import geojson
 from collections import defaultdict
 from qgis.PyQt.QtCore import QCoreApplication, QVariant
 from qgis.core import (

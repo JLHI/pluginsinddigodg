@@ -84,18 +84,15 @@ class GtfsRouteIgn(QgsProcessingAlgorithm):
         stop_id_in_stop_file = self.detect_fields(stop_df.columns, ['stop_id'])
 
         feedback.pushInfo(f"Champs détectés : trip_id={trip_id_field}, stop_sequence={stop_sequence_field}, "
-                        f"stop_id={stop_id_field}, stop_lat={stop_lat_field}, stop_lon={stop_lon_field}")
+                          f"stop_id={stop_id_field}, stop_lat={stop_lat_field}, stop_lon={stop_lon_field}")
 
         # Fusion des deux DataFrames
         feedback.pushInfo("Fusion des fichiers...")
         merged_df = trip_df.merge(stop_df, left_on=stop_id_field, right_on=stop_id_in_stop_file)
 
-        # Tri des données après fusion
-        merged_df = merged_df.sort_values(by=[trip_id_field, stop_sequence_field])
-        feedback.pushInfo(f"Nombre total de lignes après fusion : {len(merged_df)}")
-
         trip_segments = defaultdict(list)
         result = []
+        feedback.pushInfo(len(merged_df))
 
         # Génération des segments d'itinéraires
         for i in range(len(merged_df)):
@@ -108,25 +105,26 @@ class GtfsRouteIgn(QgsProcessingAlgorithm):
             else:
                 xy_arrivee = None
 
-            if xy_arrivee and xy_depart != xy_arrivee:
-                result.append([trip_id, stop_sequence, xy_depart, xy_arrivee])
+            result.append([trip_id, stop_sequence, xy_depart, xy_arrivee])
 
         for trip_id, stop_sequence, xy_depart, xy_arrivee in result:
-            try:
-                api_url = (
-                    f"https://data.geopf.fr/navigation/itineraire?"
-                    f"resource=bdtopo-osrm&profile=car&optimization=fastest"
-                    f"&start={xy_depart[1]},{xy_depart[0]}"
-                    f"&end={xy_arrivee[1]},{xy_arrivee[0]}"
-                    f"&geometryFormat=geojson"
-                )
-                response = requests.get(api_url)
-                if response.status_code == 200:
-                    route_data = response.json()
-                    coordinates = route_data["geometry"]["coordinates"]
-                    trip_segments[trip_id].append(coordinates)
-            except Exception as e:
-                feedback.reportError(f"Erreur sur le segment {trip_id}: {e}")
+            if xy_arrivee:
+                try:
+                    api_url = (
+                        f"https://data.geopf.fr/navigation/itineraire?"
+                        f"resource=bdtopo-osrm&profile=car&optimization=fastest"
+                        f"&start={xy_depart[1]},{xy_depart[0]}"
+                        f"&end={xy_arrivee[1]},{xy_arrivee[0]}"
+                        f"&geometryFormat=geojson"
+                    )
+                    response = requests.get(api_url)
+                    feedback.pushInfo(response)
+                    if response.status_code == 200:
+                        route_data = response.json()
+                        coordinates = route_data["geometry"]["coordinates"]
+                        trip_segments[trip_id].append(coordinates)
+                except Exception as e:
+                    feedback.reportError(f"Erreur sur le segment {trip_id}: {e}")
 
         # Création de la couche de sortie
         fields = QgsFields()
@@ -149,7 +147,6 @@ class GtfsRouteIgn(QgsProcessingAlgorithm):
             sink.addFeature(feature, QgsFeatureSink.FastInsert)
 
         return {self.OUTPUT_LAYER: sink_id}
-
 
     def source_to_dataframe(self, source):
         """Convert a QGIS vector source to a Pandas DataFrame."""

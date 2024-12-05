@@ -92,7 +92,7 @@ class GtfsRouteIgn(QgsProcessingAlgorithm):
 
         trip_segments = defaultdict(list)
         result = []
-        feedback.pushInfo(len(merged_df))
+        feedback.pushInfo(f'{len(merged_df)}')
 
         # Génération des segments d'itinéraires
         for i in range(len(merged_df)):
@@ -118,7 +118,7 @@ class GtfsRouteIgn(QgsProcessingAlgorithm):
                         f"&geometryFormat=geojson"
                     )
                     response = requests.get(api_url)
-                    feedback.pushInfo(response)
+                    feedback.pushInfo(f'{response}')
                     if response.status_code == 200:
                         route_data = response.json()
                         coordinates = route_data["geometry"]["coordinates"]

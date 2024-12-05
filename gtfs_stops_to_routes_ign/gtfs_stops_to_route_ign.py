@@ -92,7 +92,7 @@ class GtfsRouteIgn(QgsProcessingAlgorithm):
 
         trip_segments = defaultdict(list)
         result = []
-        feedback.pushInfo(f'{len(merged_df)}')
+        feedback.pushInfo(f'Fichier : {str(len(merged_df))}')
 
         # Génération des segments d'itinéraires
         for i in range(len(merged_df)):

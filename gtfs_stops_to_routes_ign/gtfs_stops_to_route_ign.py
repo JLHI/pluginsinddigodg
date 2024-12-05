@@ -1,5 +1,4 @@
 from qgis.PyQt.QtCore import QCoreApplication, QVariant
-
 from qgis.core import (
     QgsProcessing,
     QgsProcessingAlgorithm,
@@ -18,16 +17,12 @@ from PyQt5.QtCore import QVariant
 import pandas as pd
 import requests
 from collections import defaultdict
-
-
 class GtfsRouteIgn(QgsProcessingAlgorithm):
     """Génère une couche d'itinéraires à partir de deux fichiers GTFS."""
-
     # Déclaration des paramètres
     INPUT_TRIP_FILE = 'INPUT_TRIP_FILE'
     INPUT_STOP_FILE = 'INPUT_STOP_FILE'
     OUTPUT_LAYER = 'OUTPUT_LAYER'
-
     def initAlgorithm(self, config=None):
         # Paramètre pour le fichier stops_time (trip_id et stop_sequence)
         self.addParameter(
@@ -52,61 +47,47 @@ class GtfsRouteIgn(QgsProcessingAlgorithm):
                 self.tr("Couche de sortie (itinéraires)")
             )
         )
-
     def detect_fields(self, columns, field_candidates):
         """Détecte automatiquement un champ donné parmi les colonnes disponibles."""
         for candidate in field_candidates:
             if candidate in columns:
                 return candidate
         raise QgsProcessingException(f"Impossible de détecter un champ parmi : {', '.join(field_candidates)}")
-
     def processAlgorithm(self, parameters, context, feedback):
         # Récupération des sources d'entrée
         trip_source = self.parameterAsSource(parameters, self.INPUT_TRIP_FILE, context)
         stop_source = self.parameterAsSource(parameters, self.INPUT_STOP_FILE, context)
-
         if not trip_source or not stop_source:
             raise QgsProcessingException(self.tr("Les fichiers d'entrée sont requis."))
-
         # Convertir les sources en DataFrame
         feedback.pushInfo("Chargement des données...")
         trip_df = self.source_to_dataframe(trip_source)
         stop_df = self.source_to_dataframe(stop_source)
-
         # Détection automatique des champs
         feedback.pushInfo("Détection des champs...")
         trip_id_field = self.detect_fields(trip_df.columns, ['trip_id', 'id_trip'])
         stop_sequence_field = self.detect_fields(trip_df.columns, ['stop_sequence', 'sequence'])
         stop_id_field = self.detect_fields(trip_df.columns, ['stop_id'])
-
         stop_lat_field = self.detect_fields(stop_df.columns, ['stop_lat', 'latitude'])
         stop_lon_field = self.detect_fields(stop_df.columns, ['stop_lon', 'longitude'])
         stop_id_in_stop_file = self.detect_fields(stop_df.columns, ['stop_id'])
-
         feedback.pushInfo(f"Champs détectés : trip_id={trip_id_field}, stop_sequence={stop_sequence_field}, "
                           f"stop_id={stop_id_field}, stop_lat={stop_lat_field}, stop_lon={stop_lon_field}")
-
         # Fusion des deux DataFrames
         feedback.pushInfo("Fusion des fichiers...")
         merged_df = trip_df.merge(stop_df, left_on=stop_id_field, right_on=stop_id_in_stop_file)
-
         trip_segments = defaultdict(list)
         result = []
-        feedback.pushInfo(f'Fichier : {str(len(merged_df))}')
-
         # Génération des segments d'itinéraires
         for i in range(len(merged_df)):
             trip_id = merged_df.loc[i, trip_id_field]
             stop_sequence = merged_df.loc[i, stop_sequence_field]
             xy_depart = (merged_df.loc[i, stop_lat_field], merged_df.loc[i, stop_lon_field])
-
             if i + 1 < len(merged_df) and merged_df.loc[i + 1, trip_id_field] == trip_id:
                 xy_arrivee = (merged_df.loc[i + 1, stop_lat_field], merged_df.loc[i + 1, stop_lon_field])
             else:
                 xy_arrivee = None
-
             result.append([trip_id, stop_sequence, xy_depart, xy_arrivee])
-
         for trip_id, stop_sequence, xy_depart, xy_arrivee in result:
             if xy_arrivee:
                 try:
@@ -118,25 +99,20 @@ class GtfsRouteIgn(QgsProcessingAlgorithm):
                         f"&geometryFormat=geojson"
                     )
                     response = requests.get(api_url)
-                    feedback.pushInfo(f'{response}')
                     if response.status_code == 200:
                         route_data = response.json()
                         coordinates = route_data["geometry"]["coordinates"]
                         trip_segments[trip_id].append(coordinates)
                 except Exception as e:
                     feedback.reportError(f"Erreur sur le segment {trip_id}: {e}")
-
         # Création de la couche de sortie
         fields = QgsFields()
         fields.append(QgsField("trip_id", QVariant.String))
-
         (sink, sink_id) = self.parameterAsSink(
             parameters, self.OUTPUT_LAYER, context, fields, QgsWkbTypes.MultiLineString, QgsCoordinateReferenceSystem("EPSG:4326")
         )
-
         if sink is None:
             raise QgsProcessingException(self.invalidSinkError(parameters, self.OUTPUT_LAYER))
-
         for trip_id, segments in trip_segments.items():
             feature = QgsFeature(fields)
             multiline = QgsGeometry.fromMultiPolylineXY(
@@ -145,9 +121,7 @@ class GtfsRouteIgn(QgsProcessingAlgorithm):
             feature.setGeometry(multiline)
             feature.setAttribute("trip_id", trip_id)
             sink.addFeature(feature, QgsFeatureSink.FastInsert)
-
         return {self.OUTPUT_LAYER: sink_id}
-
     def source_to_dataframe(self, source):
         """Convert a QGIS vector source to a Pandas DataFrame."""
         fields = [field.name() for field in source.fields()]
@@ -155,24 +129,16 @@ class GtfsRouteIgn(QgsProcessingAlgorithm):
         for feature in source.getFeatures():
             data.append(feature.attributes())
         return pd.DataFrame(data, columns=fields)
-
-
-
     def name(self):
         return 'GTFS to Route IGN'
-
     def displayName(self):
         return self.tr('GTFS to Route IGN')
-
     def group(self):
-        return 'Les plugins non restreint du pôle DG d\'Inddigo'
-
+        return "Les plugins non restreint du pôle DG d\'Inddigo" 
     def groupId(self):
         return 'Les plugins non restreint du pôle DG d\'Inddigo'
-
     def tr(self, string):
         return QCoreApplication.translate('Processing', string)
-
     def createInstance(self):
         return GtfsRouteIgn()
     def shortHelpString(self):

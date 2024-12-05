@@ -1,9 +1,7 @@
 from qgis.PyQt.QtCore import QCoreApplication, QVariant
 
 from qgis.core import (
-    QgsProcessing,
     QgsProcessingAlgorithm,
-    QgsProcessingParameterFeatureSource,
     QgsProcessingParameterFeatureSink,
     QgsFields,
     QgsField,
@@ -12,7 +10,7 @@ from qgis.core import (
     QgsProcessingException,
     QgsWkbTypes,
     QgsCoordinateReferenceSystem,
-    QgsFeatureSink,QgsPointXY
+    QgsFeatureSink,QgsPointXY,QgsProcessingParameterFile
 )
 from PyQt5.QtCore import QVariant
 import pandas as pd
@@ -31,18 +29,18 @@ class GtfsRouteIgn(QgsProcessingAlgorithm):
     def initAlgorithm(self, config=None):
         # Paramètre pour le fichier stops_time (trip_id et stop_sequence)
         self.addParameter(
-            QgsProcessingParameterFeatureSource(
-                self.INPUT_TRIP_FILE,
-                self.tr("Fichier stops_time (trip_id et stop_sequence)"),
-                types=[QgsProcessing.TypeVector]
+            QgsProcessingParameterFile(
+            self.INPUT_TRIP_FILE,
+            self.tr("Fichier stops_time (trip_id et stop_sequence)"),
+            extension="txt"  # Optionnel : limiter aux fichiers .txt
             )
         )
         # Paramètre pour le fichier stops (stop_id, stop_lat, stop_lon)
         self.addParameter(
-            QgsProcessingParameterFeatureSource(
+            QgsProcessingParameterFile(
                 self.INPUT_STOP_FILE,
                 self.tr("Fichier stops (stop_id, stop_lat, stop_lon)"),
-                types=[QgsProcessing.TypeVector]
+                extension="txt"  # Optionnel : limiter aux fichiers .txt
             )
         )
         # Paramètre de sortie

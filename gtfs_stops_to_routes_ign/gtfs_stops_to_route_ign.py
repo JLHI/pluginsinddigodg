@@ -62,10 +62,12 @@ class GtfsRouteIgn(QgsProcessingAlgorithm):
         )
 
     def processAlgorithm(self, parameters, context, feedback):
+        
         # Récupération des fichiers d'entrée
         trip_file = self.parameterAsFile(parameters, self.INPUT_TRIP_FILE, context)
         stop_file = self.parameterAsFile(parameters, self.INPUT_STOP_FILE, context)
-
+        feedback.pushInfo(f"Chemin fourni pour stops_time : {trip_file}")
+        feedback.pushInfo(f"Chemin fourni pour stops : {stop_file}")
         if not trip_file or not stop_file:
             raise QgsProcessingException("Les fichiers d'entrée sont requis.")
 

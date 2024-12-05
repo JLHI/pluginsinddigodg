@@ -24,12 +24,12 @@ class GtfsRouteIgn(QgsProcessingAlgorithm):
     """Génère une couche d'itinéraires à partir de deux fichiers GTFS."""
 
     # Déclaration des paramètres
-    INPUT_TRIP_FILE = 'INPUT_TRIP_FILE'
-    INPUT_STOP_FILE = 'INPUT_STOP_FILE'
-    OUTPUT_LAYER = 'OUTPUT_LAYER'
+    INPUT_TRIP_FILE = "INPUT_TRIP_FILE"
+    INPUT_STOP_FILE = "INPUT_STOP_FILE"
+    OUTPUT_LAYER = "OUTPUT_LAYER"
 
     def initAlgorithm(self, config=None):
-        # Paramètre pour le fichier stops_time (trip_id et stop_sequence)
+        # Paramètre pour le fichier stops_time
         self.addParameter(
             QgsProcessingParameterFile(
                 self.INPUT_TRIP_FILE,
@@ -48,81 +48,79 @@ class GtfsRouteIgn(QgsProcessingAlgorithm):
         # Paramètre de sortie
         self.addParameter(
             QgsProcessingParameterFeatureSink(
-                self.OUTPUT_LAYER,
-                self.tr("Couche de sortie (itinéraires)")
+                self.OUTPUT_LAYER, self.tr("Couche de sortie (itinéraires)")
             )
         )
 
-    def detect_fields(self, columns, field_candidates):
-        """Détecte automatiquement un champ donné parmi les colonnes disponibles."""
-        for candidate in field_candidates:
+    def detect_field(self, columns, candidates):
+        """Détecte automatiquement un champ parmi les colonnes disponibles."""
+        for candidate in candidates:
             if candidate in columns:
                 return candidate
-        raise QgsProcessingException(f"Impossible de détecter un champ parmi : {', '.join(field_candidates)}")
+        raise QgsProcessingException(
+            f"Impossible de détecter un champ parmi : {', '.join(candidates)}"
+        )
 
     def processAlgorithm(self, parameters, context, feedback):
-        # Récupération des sources d'entrée
-        trip_source = self.parameterAsFile(parameters, self.INPUT_TRIP_FILE, context)
-        stop_source = self.parameterAsFile(parameters, self.INPUT_STOP_FILE, context)
+        # Récupération des fichiers d'entrée
+        trip_file = self.parameterAsFile(parameters, self.INPUT_TRIP_FILE, context)
+        stop_file = self.parameterAsFile(parameters, self.INPUT_STOP_FILE, context)
 
-        if not trip_source or not stop_source:
-            raise QgsProcessingException(self.tr("Les fichiers d'entrée sont requis."))
+        if not trip_file or not stop_file:
+            raise QgsProcessingException("Les fichiers d'entrée sont requis.")
 
-        # Convertir les sources en DataFrame
+        feedback.pushInfo(f"Fichier stops_time : {trip_file}")
+        feedback.pushInfo(f"Fichier stops : {stop_file}")
+
+        # Charger les fichiers dans des DataFrames pandas
         feedback.pushInfo("Chargement des données...")
-        trip_df = self.source_to_dataframe(trip_source)
-        stop_df = self.source_to_dataframe(stop_source)
+        try:
+            trip_df = pd.read_csv(trip_file)
+            stop_df = pd.read_csv(stop_file)
+        except Exception as e:
+            raise QgsProcessingException(f"Erreur lors du chargement des fichiers : {e}")
 
         # Détection automatique des champs
         feedback.pushInfo("Détection des champs...")
-        trip_id_field = self.detect_fields(trip_df.columns, ['trip_id', 'id_trip'])
-        stop_sequence_field = self.detect_fields(trip_df.columns, ['stop_sequence', 'sequence'])
-        stop_id_field = self.detect_fields(trip_df.columns, ['stop_id'])
+        trip_id_field = self.detect_field(trip_df.columns, ["trip_id", "id_trip"])
+        stop_sequence_field = self.detect_field(trip_df.columns, ["stop_sequence", "sequence"])
+        stop_id_field = self.detect_field(trip_df.columns, ["stop_id"])
+        stop_lat_field = self.detect_field(stop_df.columns, ["stop_lat", "latitude"])
+        stop_lon_field = self.detect_field(stop_df.columns, ["stop_lon", "longitude"])
+        stop_id_in_stop_file = self.detect_field(stop_df.columns, ["stop_id"])
 
-        stop_lat_field = self.detect_fields(stop_df.columns, ['stop_lat', 'latitude'])
-        stop_lon_field = self.detect_fields(stop_df.columns, ['stop_lon', 'longitude'])
-        stop_id_in_stop_file = self.detect_fields(stop_df.columns, ['stop_id'])
-
-        feedback.pushInfo(f"Champs détectés : trip_id={trip_id_field}, stop_sequence={stop_sequence_field}, "
-                          f"stop_id={stop_id_field}, stop_lat={stop_lat_field}, stop_lon={stop_lon_field}")
+        feedback.pushInfo(
+            f"Champs détectés : trip_id={trip_id_field}, stop_sequence={stop_sequence_field}, "
+            f"stop_id={stop_id_field}, stop_lat={stop_lat_field}, stop_lon={stop_lon_field}"
+        )
 
         # Fusion des deux DataFrames
         feedback.pushInfo("Fusion des fichiers...")
         merged_df = trip_df.merge(stop_df, left_on=stop_id_field, right_on=stop_id_in_stop_file)
 
         trip_segments = defaultdict(list)
-        result = []
 
         # Génération des segments d'itinéraires
-        for i in range(len(merged_df)):
-            trip_id = merged_df.loc[i, trip_id_field]
-            stop_sequence = merged_df.loc[i, stop_sequence_field]
-            xy_depart = (merged_df.loc[i, stop_lat_field], merged_df.loc[i, stop_lon_field])
-
-            if i + 1 < len(merged_df) and merged_df.loc[i + 1, trip_id_field] == trip_id:
-                xy_arrivee = (merged_df.loc[i + 1, stop_lat_field], merged_df.loc[i + 1, stop_lon_field])
-            else:
-                xy_arrivee = None
-
-            result.append([trip_id, stop_sequence, xy_depart, xy_arrivee])
-
-        for trip_id, stop_sequence, xy_depart, xy_arrivee in result:
-            if xy_arrivee:
+        feedback.pushInfo("Génération des segments d'itinéraires...")
+        for i in range(len(merged_df) - 1):
+            if merged_df.iloc[i][trip_id_field] == merged_df.iloc[i + 1][trip_id_field]:
+                xy_depart = (merged_df.iloc[i][stop_lat_field], merged_df.iloc[i][stop_lon_field])
+                xy_arrivee = (merged_df.iloc[i + 1][stop_lat_field], merged_df.iloc[i + 1][stop_lon_field])
+                api_url = (
+                    f"https://data.geopf.fr/navigation/itineraire?"
+                    f"resource=bdtopo-osrm&profile=car&optimization=fastest"
+                    f"&start={xy_depart[1]},{xy_depart[0]}"
+                    f"&end={xy_arrivee[1]},{xy_arrivee[0]}"
+                    f"&geometryFormat=geojson"
+                )
                 try:
-                    api_url = (
-                        f"https://data.geopf.fr/navigation/itineraire?"
-                        f"resource=bdtopo-osrm&profile=car&optimization=fastest"
-                        f"&start={xy_depart[1]},{xy_depart[0]}"
-                        f"&end={xy_arrivee[1]},{xy_arrivee[0]}"
-                        f"&geometryFormat=geojson"
-                    )
                     response = requests.get(api_url)
                     if response.status_code == 200:
                         route_data = response.json()
                         coordinates = route_data["geometry"]["coordinates"]
-                        trip_segments[trip_id].append(coordinates)
+                        trip_segments[merged_df.iloc[i][trip_id_field]].append(coordinates)
                 except Exception as e:
-                    feedback.reportError(f"Erreur sur le segment {trip_id}: {e}")
+                    feedback.reportError(f"Erreur pour {api_url}: {e}")
 
         # Création de la couche de sortie
         fields = QgsFields()
@@ -137,22 +135,14 @@ class GtfsRouteIgn(QgsProcessingAlgorithm):
 
         for trip_id, segments in trip_segments.items():
             feature = QgsFeature(fields)
-            multiline = QgsGeometry.fromMultiPolylineXY(
+            geometry = QgsGeometry.fromMultiPolylineXY(
                 [[QgsPointXY(pt[0], pt[1]) for pt in segment] for segment in segments]
             )
-            feature.setGeometry(multiline)
+            feature.setGeometry(geometry)
             feature.setAttribute("trip_id", trip_id)
             sink.addFeature(feature, QgsFeatureSink.FastInsert)
 
         return {self.OUTPUT_LAYER: sink_id}
-
-    def source_to_dataframe(self, source):
-        """Convert a QGIS vector source to a Pandas DataFrame."""
-        fields = [field.name() for field in source.fields()]
-        data = []
-        for feature in source.getFeatures():
-            data.append(feature.attributes())
-        return pd.DataFrame(data, columns=fields)
 
 
 

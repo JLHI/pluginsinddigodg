@@ -173,40 +173,40 @@ class GtfsRouteIgn(QgsProcessingAlgorithm):
 
     def createInstance(self):
         return GtfsRouteIgn()
-def shortHelpString(self):
-    """
-    Retourne le texte d'aide pour l'outil.
-    """
-    return """
-        <h3>Outil Inddigo : GTFS to Route IGN</h3>
-        <p>Ce plugin permet de générer des itinéraires détaillés à partir de fichiers GTFS, en utilisant une API externe pour obtenir les tracés géographiques précis.</p>
-        
-        <h4>Fonctionnalités principales :</h4>
-        <ul>
-            <li>Fusion des données de fichiers GTFS (<b>stops_time</b> et <b>stops</b>).</li>
-            <li>Génération automatique des segments d'itinéraires entre les arrêts, basés sur les coordonnées des arrêts.</li>
-            <li>Requête à une API de routage (IGN) pour obtenir des itinéraires optimisés et précis entre les points.</li>
-            <li>Création d'une couche de sortie au format <b>MultiLineString</b>, avec les segments regroupés par identifiant de trajet (<b>trip_id</b>).</li>
-        </ul>
-        
-        <h4>Paramètres :</h4>
-        <ul>
-            <li><b>Fichier stops_time :</b> Fichier GTFS contenant les informations sur les trajets (trip_id, stop_sequence, stop_id).</li>
-            <li><b>Fichier stops :</b> Fichier GTFS contenant les coordonnées des arrêts (stop_id, stop_lat, stop_lon).</li>
-            <li><b>Couche de sortie :</b> La couche générée contenant les itinéraires avec des géométries détaillées.</li>
-        </ul>
-        
-        <h4>Résultat :</h4>
-        <p>Une couche de polylignes représentant les itinéraires, où chaque trajet (<b>trip_id</b>) est associé à un ensemble de segments géographiques détaillés.</p>
-        
-        <h4>Prérequis :</h4>
-        <ul>
-            <li>Deux fichiers GTFS valides (stops_time et stops).</li>
-            <li>Accès à Internet pour interagir avec l'API IGN.</li>
-        </ul>
-        
-        <p><i>Note :</i> Vérifiez les champs disponibles dans vos fichiers d'entrée. Les champs requis (trip_id, stop_sequence, stop_id, stop_lat, stop_lon) sont détectés automatiquement.</p>
-    """
+    def shortHelpString(self):
+        """
+        Retourne le texte d'aide pour l'outil.
+        """
+        return """
+            <h3>Outil Inddigo : GTFS to Route IGN</h3>
+            <p>Ce plugin permet de générer des itinéraires détaillés à partir de fichiers GTFS, en utilisant une API externe pour obtenir les tracés géographiques précis.</p>
+            
+            <h4>Fonctionnalités principales :</h4>
+            <ul>
+                <li>Fusion des données de fichiers GTFS (<b>stops_time</b> et <b>stops</b>).</li>
+                <li>Génération automatique des segments d'itinéraires entre les arrêts, basés sur les coordonnées des arrêts.</li>
+                <li>Requête à une API de routage (IGN) pour obtenir des itinéraires optimisés et précis entre les points.</li>
+                <li>Création d'une couche de sortie au format <b>MultiLineString</b>, avec les segments regroupés par identifiant de trajet (<b>trip_id</b>).</li>
+            </ul>
+            
+            <h4>Paramètres :</h4>
+            <ul>
+                <li><b>Fichier stops_time :</b> Fichier GTFS contenant les informations sur les trajets (trip_id, stop_sequence, stop_id).</li>
+                <li><b>Fichier stops :</b> Fichier GTFS contenant les coordonnées des arrêts (stop_id, stop_lat, stop_lon).</li>
+                <li><b>Couche de sortie :</b> La couche générée contenant les itinéraires avec des géométries détaillées.</li>
+            </ul>
+            
+            <h4>Résultat :</h4>
+            <p>Une couche de polylignes représentant les itinéraires, où chaque trajet (<b>trip_id</b>) est associé à un ensemble de segments géographiques détaillés.</p>
+            
+            <h4>Prérequis :</h4>
+            <ul>
+                <li>Deux fichiers GTFS valides (stops_time et stops).</li>
+                <li>Accès à Internet pour interagir avec l'API IGN.</li>
+            </ul>
+            
+            <p><i>Note :</i> Vérifiez les champs disponibles dans vos fichiers d'entrée. Les champs requis (trip_id, stop_sequence, stop_id, stop_lat, stop_lon) sont détectés automatiquement.</p>
+        """
     # def icon(self):
     #     """
     #     Retourne une icône personnalisée pour cet algorithme.

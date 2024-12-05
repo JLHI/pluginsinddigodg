@@ -318,8 +318,7 @@ class ItineraireParLaRouteAlgorithm(QgsProcessingAlgorithm):
         """
         return """
             <h3>Outil Inddigo : Itinéraire par la route</h3>
-            <p>Ce plugin permet de calculer des itinéraires routiers entre des points de départ et d'arrivée
-            provenant de deux couches de points distinctes.</p>
+            <p>Ce plugin permet de calculer des itinéraires routiers entre des points de départ et d'arrivée provenant de deux couches de points distinctes.</p>
             <h4>Fonctionnalités principales :</h4>
             <ul>
                 <li>Calcul des itinéraires entre deux couches de points via l'API IGN.</li>

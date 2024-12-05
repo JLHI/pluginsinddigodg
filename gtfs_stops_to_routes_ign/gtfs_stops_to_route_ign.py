@@ -5,7 +5,7 @@ from qgis.PyQt.QtCore import QCoreApplication, QVariant
 from qgis.core import (
     QgsProcessing,
     QgsProcessingAlgorithm,
-    QgsProcessingParameterFile,
+    QgsProcessingParameterFeatureSource,
     QgsProcessingParameterFeatureSink,
     QgsProcessingException,
     QgsFields,
@@ -19,6 +19,9 @@ from qgis.core import (
 )
 
 
+
+
+
 class GtfsRouteIgn(QgsProcessingAlgorithm):
     """Génère une couche d'itinéraires à partir de deux fichiers GTFS."""
 
@@ -27,20 +30,20 @@ class GtfsRouteIgn(QgsProcessingAlgorithm):
     OUTPUT_LAYER = "OUTPUT_LAYER"
 
     def initAlgorithm(self, config=None):
-        # Fichier stop_times
+        # Couche stop_times
         self.addParameter(
-            QgsProcessingParameterFile(
+            QgsProcessingParameterFeatureSource(
                 self.INPUT_TRIP_FILE,
-                self.tr("Fichier stop_times (trip_id, stop_id, stop_sequence)"),
-                extension="txt",  # Extension attendue
+                self.tr("Couche stop_times (trip_id, stop_id, stop_sequence)"),
+                types=[QgsProcessing.TypeVector],
             )
         )
-        # Fichier stops
+        # Couche stops
         self.addParameter(
-            QgsProcessingParameterFile(
+            QgsProcessingParameterFeatureSource(
                 self.INPUT_STOP_FILE,
-                self.tr("Fichier stops (stop_id, stop_lat, stop_lon)"),
-                extension="txt",  # Extension attendue
+                self.tr("Couche stops (stop_id, stop_lat, stop_lon)"),
+                types=[QgsProcessing.TypeVector],
             )
         )
         # Paramètre de sortie
@@ -50,26 +53,46 @@ class GtfsRouteIgn(QgsProcessingAlgorithm):
             )
         )
 
+    def source_to_dataframe(self, source):
+        """Convertit une couche QGIS en un DataFrame pandas."""
+        fields = [field.name() for field in source.fields()]
+        data = []
+        for feature in source.getFeatures():
+            data.append(feature.attributes())
+        return pd.DataFrame(data, columns=fields)
+
     def processAlgorithm(self, parameters, context, feedback):
-        # Récupération des fichiers
-        trip_file = self.parameterAsFile(parameters, self.INPUT_TRIP_FILE, context)
-        stop_file = self.parameterAsFile(parameters, self.INPUT_STOP_FILE, context)
+        # Récupération des couches
+        trip_source = self.parameterAsSource(parameters, self.INPUT_TRIP_FILE, context)
+        stop_source = self.parameterAsSource(parameters, self.INPUT_STOP_FILE, context)
 
-        if not trip_file or not stop_file:
-            raise QgsProcessingException("Les fichiers d'entrée sont requis.")
+        if not trip_source or not stop_source:
+            raise QgsProcessingException("Les couches d'entrée sont requises.")
 
-        # Charger les fichiers dans des DataFrames pandas
-        feedback.pushInfo("Chargement des fichiers...")
-        try:
-            trip_df = pd.read_csv(trip_file, delimiter=",")
-            stop_df = pd.read_csv(stop_file, delimiter=",")
-            feedback.pushInfo(f"Fichier stop_times chargé avec {len(trip_df)} lignes.")
-            feedback.pushInfo(f"Fichier stops chargé avec {len(stop_df)} lignes.")
-        except Exception as e:
-            raise QgsProcessingException(f"Erreur lors du chargement des fichiers : {e}")
+        # Convertir les couches en DataFrame
+        feedback.pushInfo("Conversion des couches en DataFrame...")
+        trip_df = self.source_to_dataframe(trip_source)
+        stop_df = self.source_to_dataframe(stop_source)
+
+        feedback.pushInfo(f"stop_times contient {len(trip_df)} lignes.")
+        feedback.pushInfo(f"stops contient {len(stop_df)} lignes.")
+
+        # Validation des colonnes
+        required_trip_cols = ["trip_id", "stop_id", "stop_sequence"]
+        required_stop_cols = ["stop_id", "stop_lat", "stop_lon"]
+
+        if not all(col in trip_df.columns for col in required_trip_cols):
+            raise QgsProcessingException(
+                f"La couche stop_times manque des colonnes nécessaires : {required_trip_cols}"
+            )
+
+        if not all(col in stop_df.columns for col in required_stop_cols):
+            raise QgsProcessingException(
+                f"La couche stops manque des colonnes nécessaires : {required_stop_cols}"
+            )
 
         # Fusion des fichiers pour obtenir les coordonnées
-        feedback.pushInfo("Fusion des fichiers stop_times et stops...")
+        feedback.pushInfo("Fusion des couches stop_times et stops...")
         merged_df = trip_df.merge(stop_df, on="stop_id", how="inner")
         feedback.pushInfo(f"Fusion terminée avec {len(merged_df)} lignes.")
 
@@ -106,8 +129,8 @@ class GtfsRouteIgn(QgsProcessingAlgorithm):
                     api_url = (
                         f"https://data.geopf.fr/navigation/itineraire?"
                         f"resource=bdtopo-osrm&profile=car&optimization=fastest"
-                        f"&start={xy_depart[0]},{xy_depart[1]}"
-                        f"&end={xy_arrivee[0]},{xy_arrivee[1]}"
+                        f"&start={xy_depart[1]},{xy_depart[0]}"
+                        f"&end={xy_arrivee[1]},{xy_arrivee[0]}"
                         f"&geometryFormat=geojson"
                     )
                     response = requests.get(api_url)
@@ -156,11 +179,11 @@ class GtfsRouteIgn(QgsProcessingAlgorithm):
         return self.tr("GTFS to Route IGN")
 
     def group(self):
-        return "GTFS Tools"
+        return 'Les plugins non restreint du pôle DG d\'Inddigo'
 
     def groupId(self):
-        return "gtfs_tools"
-
+        return 'Les plugins non restreint du pôle DG d\'Inddigo'
+    
     def tr(self, string):
         return QCoreApplication.translate("Processing", string)
 

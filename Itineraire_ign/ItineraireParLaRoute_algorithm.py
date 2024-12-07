@@ -14,7 +14,7 @@ from qgis.core import (
     QgsPointXY,
     QgsCoordinateTransform,
     QgsCoordinateReferenceSystem,
-    QgsProcessingParameterField,
+    QgsProcessingParameterField,QgsProcessingParameterEnum,
     QgsWkbTypes,QgsProcessingParameterBoolean,QgsProcessingParameterDefinition
 )
 from qgis.PyQt.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
@@ -33,6 +33,7 @@ class ItineraireParLaRouteAlgorithm(QgsProcessingAlgorithm):
     BUFFER_SIZE = 'BUFFER_SIZE'
     ID_FIELD1 = 'ID_FIELD1'
     ID_FIELD2 = 'ID_FIELD2'
+    CKB_MODE = 'CKB_MODE'
     COMMON_FIELD1 = 'COMMON_FIELD1'
     COMMON_FIELD2 = 'COMMON_FIELD2'
     OUTPUT = 'OUTPUT'
@@ -100,6 +101,17 @@ class ItineraireParLaRouteAlgorithm(QgsProcessingAlgorithm):
                 defaultValue=False
             )
         )
+        #Choix du mode
+        self.addParameter( 
+            QgsProcessingParameterEnum(
+                self.CKB_MODE,
+                self.tr("Selectionnez le mode"),
+                options=["pieton", "Voiture"],
+                allowMultiple=False,  
+                defaultValue= 1    
+            )
+        )
+        
         # Couche de sortie
         self.addParameter(
             QgsProcessingParameterFeatureSink(
@@ -111,6 +123,7 @@ class ItineraireParLaRouteAlgorithm(QgsProcessingAlgorithm):
         advanced_param_buffer.setFlags(advanced_param_buffer.flags() | QgsProcessingParameterDefinition.FlagOptional | QgsProcessingParameterDefinition.FlagAdvanced)
         advanced_param_communfield_1.setFlags(advanced_param_communfield_1.flags() | QgsProcessingParameterDefinition.FlagOptional | QgsProcessingParameterDefinition.FlagAdvanced)
         advanced_param_communfield_2.setFlags(advanced_param_communfield_2.flags() | QgsProcessingParameterDefinition.FlagOptional | QgsProcessingParameterDefinition.FlagAdvanced)
+
         self.addParameter(advanced_param_buffer)
         self.addParameter(advanced_param_communfield_1)
         self.addParameter(advanced_param_communfield_2)
@@ -126,6 +139,7 @@ class ItineraireParLaRouteAlgorithm(QgsProcessingAlgorithm):
         buffer_size = self.parameterAsDouble(parameters, self.BUFFER_SIZE, context)
         id_field1 = self.parameterAsString(parameters, self.ID_FIELD1, context)
         id_field2 = self.parameterAsString(parameters, self.ID_FIELD2, context)
+        mode = self.parameterAsString(parameters, self.CKB_MODE, context)
         common_field1 = self.parameterAsString(parameters, self.COMMON_FIELD1, context)
         common_field2 = self.parameterAsString(parameters, self.COMMON_FIELD2, context)
         filter_min_distance = self.parameterAsBoolean(parameters, 'FILTER_MIN_DISTANCE', context)
@@ -191,7 +205,7 @@ class ItineraireParLaRouteAlgorithm(QgsProcessingAlgorithm):
         last_progress = 0
         # Calculer les itinéraires
         output_features = []  # Liste temporaire pour stocker les entités
-
+        mode  = 'car' if mode == '1' else 'pedestrian'
         for i, feature1 in enumerate(features1):
             id1 = feature1[id_field1]
             if buffer_size > 0:
@@ -213,7 +227,7 @@ class ItineraireParLaRouteAlgorithm(QgsProcessingAlgorithm):
                 point1 = transform_to_wgs84.transform(feature1.geometry().asPoint())
                 point2 = transform_to_wgs84.transform(feature2.geometry().asPoint())
 
-                url = QUrl(f"https://data.geopf.fr/navigation/itineraire?resource=bdtopo-osrm&profile=car&start={point1.x()},{point1.y()}&end={point2.x()},{point2.y()}")
+                url = QUrl(f"https://data.geopf.fr/navigation/itineraire?resource=bdtopo-osrm&profile={mode}&start={point1.x()},{point1.y()}&end={point2.x()},{point2.y()}")
                 request = QNetworkRequest(url)
 
                 try:
@@ -236,7 +250,7 @@ class ItineraireParLaRouteAlgorithm(QgsProcessingAlgorithm):
                     id1,
                     id2,
                     route_info.get("distance", 0),
-                    route_info.get("duration", 0)
+                    route_info.get("duration", 0)/60
                 ])
                 output_features.append(new_feature)  # Ajouter à la liste temporaire
 
@@ -298,7 +312,7 @@ class ItineraireParLaRouteAlgorithm(QgsProcessingAlgorithm):
         return 'itineraireparlaroute'
 
     def displayName(self):
-        return self.tr('Itinéraire par la route')
+        return self.tr('IGN - Itinéraire par la route')
 
     def group(self):
         return 'Les plugins non restreint du pôle DG d\'Inddigo'
@@ -332,6 +346,7 @@ class ItineraireParLaRouteAlgorithm(QgsProcessingAlgorithm):
                 <li><b>Champ d’ID dans la couche 1 :</b> Champ identifiant les entités de la première couche.</li>
                 <li><b>Couche d’entrée 2 (Points d’arrivée) :</b> La deuxième couche de points utilisée comme points d’arrivée.</li>
                 <li><b>Champ d’ID dans la couche 2 :</b> Champ identifiant les entités de la deuxième couche.</li>
+                <li><b>Choix du mode :</b> Pieton ou voiture.</li>
                 <li><b>Taille du buffer (optionnel) :</b> Taille du buffer pour limiter les calculs d’itinéraires.</li>
                 <li><b>Champs communs (optionnels) :</b> Champs à utiliser pour filtrer les points des deux couches.</li>
                 <li><b>Conserver uniquement la ligne avec la distance minimale :</b> Permet de n’exporter que l’itinéraire le plus court pour chaque point de départ.</li>

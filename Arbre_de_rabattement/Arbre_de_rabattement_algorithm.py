@@ -39,7 +39,7 @@ class ArbreDeRabattementAlgorithm(QgsProcessingAlgorithm):
                 self.COUNT_FIELD,
                 self.tr('Champ pour Count (Couche Itinéraires)'),
                 parentLayerParameterName=self.ROUTES_LAYER,
-                type=QgsProcessingParameterField.Numeric,
+                type=QgsProcessingParameterField.Any,
                 optional=False
             )
         )
@@ -105,7 +105,8 @@ class ArbreDeRabattementAlgorithm(QgsProcessingAlgorithm):
 
         feedback.pushInfo("Traitement terminé. Couche de sortie créée avec les segments d'itinéraires agrégés.")
 
-       
+        return {self.OUTPUT_LAYER: dest_id}
+
 
 
    

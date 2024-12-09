@@ -31,10 +31,13 @@ __copyright__ = '(C) 2024 by JLHI'
 __revision__ = '$Format:%H$'
 
 from qgis.core import QgsProcessingProvider
-from .PluginsInddigoDG_algorithm import PluginsInddigoDGAlgorithm
+#from .PluginsInddigoDG_algorithm import PluginsInddigoDGAlgorithm
+
 from .Arbre_de_rabattement.Arbre_de_rabattement_algorithm import ArbreDeRabattementAlgorithm
-from.gtfs_stops_to_routes_ign.gtfs_stops_to_route_ign import GtfsRouteIgn
-from.Itineraire_ign.ItineraireParLaRoute_algorithm import ItineraireParLaRouteAlgorithm
+from .gtfs_stops_to_routes_ign.gtfs_stops_to_route_ign import GtfsRouteIgn
+from .Itineraire_ign.ItineraireParLaRoute_algorithm import ItineraireParLaRouteAlgorithm
+from .isochrone_ign.isochrone_ign import IsochroneIgnAlgorithm
+from .TcIsoFromGtfs.tcisofromgtfs import GtfsIsochrone
 
 class PluginsInddigoDGProvider(QgsProcessingProvider):
 
@@ -60,6 +63,9 @@ class PluginsInddigoDGProvider(QgsProcessingProvider):
         self.addAlgorithm(ArbreDeRabattementAlgorithm())
         self.addAlgorithm(GtfsRouteIgn())
         self.addAlgorithm(ItineraireParLaRouteAlgorithm())
+        self.addAlgorithm(IsochroneIgnAlgorithm())
+        self.addAlgorithm(GtfsIsochrone())
+
 
 
         # add additional algorithms here

@@ -312,13 +312,13 @@ class ItineraireParLaRouteAlgorithm(QgsProcessingAlgorithm):
         return 'itineraireparlaroute'
 
     def displayName(self):
-        return self.tr('IGN - Itinéraire par la route')
+        return self.tr('Itinéraire')
 
     def group(self):
-        return 'Les plugins non restreint du pôle DG d\'Inddigo'
+        return 'IGN'
 
     def groupId(self):
-        return 'Les plugins non restreint du pôle DG d\'Inddigo'
+        return 'IGN'
 
     def tr(self, string):
         return QCoreApplication.translate('Processing', string)

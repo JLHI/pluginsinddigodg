@@ -197,7 +197,8 @@ class GtfsRouteIgn(QgsProcessingAlgorithm):
         return """
             <h3>Outil Inddigo : GTFS to Route IGN</h3>
             <p>Ce plugin permet de générer des itinéraires détaillés à partir de fichiers GTFS, en utilisant une API externe pour obtenir les tracés géographiques précis.</p>
-            
+            <p>Il est nécessaire d'ajouter les couches avec ""Ajouter une couche de texte délimité, afin de filtrer les trip_id si nécessaire</p>
+
             <h4>Fonctionnalités principales :</h4>
             <ul>
                 <li>Fusion des données de fichiers GTFS (<b>stops_time</b> et <b>stops</b>).</li>

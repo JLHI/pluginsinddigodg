@@ -28,7 +28,7 @@ class ArbreDeRabattementAlgorithm(QgsProcessingAlgorithm):
         self.addParameter(
             QgsProcessingParameterVectorLayer(
                 self.ROUTES_LAYER,
-                self.tr('Couche Itinéraires (Projet)'),
+                self.tr('Couche Itinéraires'),
                 [QgsProcessing.TypeVectorLine],
                 optional=False
             )
@@ -37,7 +37,7 @@ class ArbreDeRabattementAlgorithm(QgsProcessingAlgorithm):
         self.addParameter(
             QgsProcessingParameterField(
                 self.COUNT_FIELD,
-                self.tr('Champ pour Count (Couche Itinéraires)'),
+                self.tr('Champ à Compter (Identifiant)'),
                 parentLayerParameterName=self.ROUTES_LAYER,
                 type=QgsProcessingParameterField.Any,
                 optional=False
@@ -47,7 +47,7 @@ class ArbreDeRabattementAlgorithm(QgsProcessingAlgorithm):
         self.addParameter(
             QgsProcessingParameterField(
                 self.SUM_FIELD,
-                self.tr('Champ pour la Somme (optionnel, Couche Itinéraires)'),
+                self.tr('Champ pour la Somme (Flux par exemple)'),
                 parentLayerParameterName=self.ROUTES_LAYER,
                 type=QgsProcessingParameterField.Numeric,
                 optional=True

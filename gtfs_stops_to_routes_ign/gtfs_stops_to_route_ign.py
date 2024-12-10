@@ -179,10 +179,10 @@ class GtfsRouteIgn(QgsProcessingAlgorithm):
         return self.tr("GTFS to Route IGN")
 
     def group(self):
-        return 'Les plugins non restreint du pôle DG d\'Inddigo'
+        return 'GTFS'
 
     def groupId(self):
-        return 'Les plugins non restreint du pôle DG d\'Inddigo'
+        return 'GTFS'
     
     def tr(self, string):
         return QCoreApplication.translate("Processing", string)

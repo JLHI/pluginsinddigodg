@@ -177,6 +177,12 @@ class GtfsIsochrone(QgsProcessingAlgorithm):
 
     def displayName(self):
         return "Isochrones TC à partir de GTFS"
+    
+    def group(self):
+        return 'GTFS'
+
+    def groupId(self):
+        return 'GTFS'
 
     def createInstance(self):
         return GtfsIsochrone()

@@ -118,10 +118,10 @@ class ArbreDeRabattementAlgorithm(QgsProcessingAlgorithm):
         return self.tr('Arbre de rabattement')
 
     def group(self):
-        return "Les plugins non restreint du pôle DG d\'Inddigo" 
+        return "IGN" 
 
     def groupId(self):
-        return 'Les plugins non restreint du pôle DG d\'Inddigo'
+        return 'IGN'
 
     def tr(self, string):
         return QCoreApplication.translate('Processing', string)

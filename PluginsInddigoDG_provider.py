@@ -64,7 +64,7 @@ class PluginsInddigoDGProvider(QgsProcessingProvider):
         self.addAlgorithm(GtfsRouteIgn())
         self.addAlgorithm(ItineraireParLaRouteAlgorithm())
         self.addAlgorithm(IsochroneIgnAlgorithm())
-        self.addAlgorithm(GtfsIsochrone())
+        #self.addAlgorithm(GtfsIsochrone())
 
 
 

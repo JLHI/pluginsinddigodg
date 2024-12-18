@@ -43,7 +43,7 @@ def build_isochrone_from_points(distances):
     points = geopandas.GeoDataFrame(
         distances, geometry=geopandas.points_from_xy(distances["lon"], distances["lat"])
     )
-    mapping_CRS = "EPSG:3949"
+    mapping_CRS = "EPSG:2154"
     lonlat_CRS = "EPSG:4326"
     # initial coords: lon, lat
     points = points.set_crs(lonlat_CRS)
@@ -102,6 +102,7 @@ def compute_isochrone_arrival(gtfs_folder, lat, lon, arrival_time, max_duration_
     Calcule les isochrones pour une heure d'arrivée souhaitée à partir d'un point (lat, lon).
     """
     # Charger les données GTFS
+     # Charger les données GTFS
     data = load_prepared_data(gtfs_folder)
     stops = data.stops
     stop_times = data.stoptimes
@@ -114,12 +115,38 @@ def compute_isochrone_arrival(gtfs_folder, lat, lon, arrival_time, max_duration_
     if accessible_stops.empty:
         print("Aucun arrêt accessible trouvé.")
         return {"type": "FeatureCollection", "features": []}
+    
+    print("Accessible stops :", accessible_stops.head())
 
     # Étape 2 : Identifier les voyages actifs
     valid_trips = stop_times[stop_times["stop_id"].isin(accessible_stops["stop_id"])]
-    valid_trips = valid_trips.merge(trips_dates, on="trip_id")
-    valid_trips["date"] = pd.to_datetime(valid_trips["date"]).dt.date
+    print("Nombre de voyages après filtrage des stops accessibles :", len(valid_trips))
+
+    # Vérification de la jointure
+    valid_trips = valid_trips.merge(trips_dates, on="trip_id", how="inner")
+    print("Nombre de voyages après jointure avec trips_dates :", len(valid_trips))
+
+    # Débogage des dates
+    print("Avant conversion, format de trips_dates['date'] :", trips_dates["date"].dtype)
+    print("Exemple de données dans trips_dates['date'] :", trips_dates["date"].head())
+
+    # Conversion explicite des dates
+    valid_trips["date"] = pd.to_datetime(valid_trips["date"], errors="coerce").dt.date
+    print("Après conversion, format de valid_trips['date'] :", valid_trips["date"].dtype)
+    print("Exemple de dates après conversion :", valid_trips["date"].head())
+
+    # Vérification de l'arrival_time
+    print("Arrival date (cible) :", arrival_time.date())
+
+    # Vérifier si la date cible est présente
+    if arrival_time.date() not in valid_trips["date"].unique():
+        print(f"La date {arrival_time.date()} n'est pas présente dans les données valid_trips.")
+        print("Dates disponibles dans valid_trips :", valid_trips["date"].unique())
+        return {"type": "FeatureCollection", "features": []}
+
+    # Filtrage par date
     valid_trips = valid_trips[valid_trips["date"] == arrival_time.date()]
+    print("Nombre de voyages après filtrage par date :", len(valid_trips))
 
     if valid_trips.empty:
         print("Aucun voyage actif trouvé pour la date spécifiée.")
@@ -133,7 +160,7 @@ def compute_isochrone_arrival(gtfs_folder, lat, lon, arrival_time, max_duration_
     # Vérifier la présence des colonnes nécessaires
     if "stop_lat" not in valid_trips or "stop_lon" not in valid_trips:
         raise ValueError("Les colonnes nécessaires `stop_lat` et `stop_lon` sont manquantes dans valid_trips.")
-
+    
     # Étape 3 : Calcul des arrêts atteignables
     reachable_stops = compute_reachable_stops(valid_trips, arrival_time, max_duration_seconds)
 
@@ -184,12 +211,20 @@ def compute_reachable_stops(stop_times, arrival_time, max_duration_seconds):
     """
     Calcul des arrêts atteignables dans une fenêtre temporelle.
     """
-    # Calculer les limites de temps
+        # Calculer les limites de temps
     latest_departure_time = arrival_time - datetime.timedelta(seconds=max_duration_seconds)
 
     # Ajouter la colonne `arrival_datetime`
-    base_datetime = datetime.datetime.combine(arrival_time.date(), datetime.datetime.min.time())
+    base_datetime = datetime.datetime.combine(arrival_time.date(), datetime.time(0, 0))
+    print(f"Base datetime : {base_datetime}")
+    print(f"Latest departure time : {latest_departure_time}")
+
+    # Convertir arrival_time en timedelta si nécessaire
+    if not pd.api.types.is_timedelta64_dtype(stop_times["arrival_time"]):
+        stop_times["arrival_time"] = pd.to_timedelta(stop_times["arrival_time"].astype(str))
+
     stop_times["arrival_datetime"] = base_datetime + stop_times["arrival_time"]
+    print(f"Données après ajout de 'arrival_datetime' :\n{stop_times[['stop_id', 'arrival_datetime']].head()}")
 
     # Filtrer les arrêts atteignables
     reachable_stops_df = stop_times[
@@ -203,6 +238,7 @@ def compute_reachable_stops(stop_times, arrival_time, max_duration_seconds):
 
     # Construire une liste de dictionnaires pour les arrêts atteignables
     reachable_stops = reachable_stops_df[["stop_id", "arrival_datetime", "stop_lat", "stop_lon"]].to_dict(orient="records")
+    print(f"Arrêts atteignables : {reachable_stops}")
     return reachable_stops
 
 

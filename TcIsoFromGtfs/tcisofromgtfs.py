@@ -18,7 +18,7 @@ from qgis.PyQt.QtCore import QVariant
 
 from .gtfs_isochrone.main import compute_isochrone,compute_isochrone_arrival
 import datetime
-
+from .gtfs_isochrone.prepare import prepare_data_in_gtfs_folder
 # Obtenir la date et l'heure de demain
 tomorrow = datetime.datetime.now() + datetime.timedelta(days=1)
 
@@ -92,7 +92,12 @@ class GtfsIsochrone(QgsProcessingAlgorithm):
         start_datetime_str = self.parameterAsString(parameters, self.START_DATETIME, context)
         duration_ranges = self.parameterAsString(parameters, "DURATION_RANGES", context)
         type_heure = parameters['TYPE_HEURE']  # 0 pour "Heure de départ", 1 pour "Heure d'arrivée"
-        # Convertir la date et l'heure
+        try : 
+            feedback.pushInfo("Préparation des données d'entrée...")
+            prepare_data_in_gtfs_folder(gtfs_folder)
+        except Exception as e:
+            raise QgsProcessingException(f"Impossible de préparer les données :{e}")
+
         try:
             start_datetime = datetime.datetime.strptime(start_datetime_str, "%Y-%m-%d %H:%M:%S")
         except ValueError:

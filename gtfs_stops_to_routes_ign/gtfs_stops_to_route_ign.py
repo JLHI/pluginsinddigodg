@@ -161,14 +161,49 @@ class GtfsRouteIgn(QgsProcessingAlgorithm):
             )
 
         # Ajout des segments dans la couche de sortie
+        # Ajout des segments à la couche de sortie
         for trip_id, segments in trip_segments.items():
-            feature = QgsFeature(fields)
-            multiline = QgsGeometry.fromMultiPolylineXY(
-                [[QgsPointXY(pt[0], pt[1]) for pt in segment] for segment in segments]
-            )
-            feature.setGeometry(multiline)
-            feature.setAttribute("trip_id", trip_id)
-            sink.addFeature(feature, QgsFeatureSink.FastInsert)
+            trip_id = str(trip_id)
+            # Vérification que trip_id n'est pas vide
+            if not trip_id or trip_id.strip() == "":
+                feedback.reportError(f"⚠️ trip_id vide détecté, remplacement par 'UNKNOWN'")
+                trip_id = "UNKNOWN"
+
+            # Vérification que segments contient bien des données
+            if not segments or len(segments) == 0:
+                feedback.reportError(f"⚠️ Aucun segment trouvé pour trip_id={trip_id}, ignoré.")
+                continue  # Ignore cette entrée si aucun segment n'est disponible
+
+            # Vérification supplémentaire : au moins un segment doit contenir au moins 2 points
+            valid_segments = [
+                [QgsPointXY(pt[0], pt[1]) for pt in segment] for segment in segments if len(segment) > 1
+            ]
+
+            if not valid_segments:
+                feedback.reportError(f"⚠️ trip_id={trip_id} a des segments vides ou invalides, ignoré.")
+                continue  # Ignore cette entrée si aucun segment n'est valide
+
+            try:
+                # Création de l'entité
+                feature = QgsFeature(fields)
+                
+                # Création de la géométrie MultiLineString
+                multiline = QgsGeometry.fromMultiPolylineXY(valid_segments)
+
+                # Vérification que la géométrie est bien créée
+                if not multiline or multiline.isEmpty():
+                    feedback.reportError(f"⚠️ Géométrie invalide pour trip_id={trip_id}, ignorée.")
+                    continue  # Ignore cette entité si la géométrie est invalide
+
+                # Affectation des attributs
+                feature.setGeometry(multiline)
+                feature.setAttribute("trip_id", trip_id)
+
+                # Ajout de l'entité à la couche de sortie
+                sink.addFeature(feature, QgsFeatureSink.FastInsert)
+
+            except Exception as e:
+                feedback.reportError(f"❌ Erreur lors du traitement de trip_id={trip_id}: {e}")
 
         return {self.OUTPUT_LAYER: sink_id}
 

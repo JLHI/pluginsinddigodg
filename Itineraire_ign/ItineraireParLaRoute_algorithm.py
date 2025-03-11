@@ -157,10 +157,10 @@ class ItineraireParLaRouteAlgorithm(QgsProcessingAlgorithm):
 
         # Transformer les entités dans un système de coordonnées projeté
         features1 = [
-            self.transformFeature(feature, transform_to_projected) for feature in source1.getFeatures()
+            self.transformFeature(feature, transform_to_wgs84) for feature in source1.getFeatures()
         ]
         features2 = [
-            self.transformFeature(feature, transform_to_projected2) for feature in source2.getFeatures()
+            self.transformFeature(feature, transform_to_wgs84) for feature in source2.getFeatures()
         ]
 
         # Filtrer par champs communs si spécifiés

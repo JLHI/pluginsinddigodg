@@ -157,10 +157,10 @@ class ItineraireParLaRouteAlgorithm(QgsProcessingAlgorithm):
 
         # Transformer les entités dans un système de coordonnées projeté
         features1 = [
-            self.transformFeature(feature, transform_to_wgs84) for feature in source1.getFeatures()
+            self.transformFeature(feature, transform_to_projected) for feature in source1.getFeatures()
         ]
         features2 = [
-            self.transformFeature(feature, transform_to_wgs84) for feature in source2.getFeatures()
+            self.transformFeature(feature, transform_to_projected2) for feature in source2.getFeatures()
         ]
 
         # Filtrer par champs communs si spécifiés
@@ -226,8 +226,8 @@ class ItineraireParLaRouteAlgorithm(QgsProcessingAlgorithm):
                 time.sleep(0.222)
                 id2 = feature2[id_field2]
                 # Transformer les coordonnées pour l'API
-                point1 = transform_to_wgs84.transform(feature1.geometry().asPoint())
-                point2 = transform_to_wgs84.transform(feature2.geometry().asPoint())
+                point1 = transform_to_projected.transform(feature1.geometry().asPoint())
+                point2 = transform_to_projected2.transform(feature2.geometry().asPoint())
 
                 url = QUrl(f"https://data.geopf.fr/navigation/itineraire?resource=bdtopo-osrm&profile={mode}&start={point1.x()},{point1.y()}&end={point2.x()},{point2.y()}")
                 request = QNetworkRequest(url)

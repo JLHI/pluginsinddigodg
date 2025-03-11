@@ -20,7 +20,7 @@ from qgis.core import (
 from qgis.PyQt.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
 from PyQt5.QtCore import QVariant, QUrl
 import json
-
+import time  
 
 class ItineraireParLaRouteAlgorithm(QgsProcessingAlgorithm):
     """
@@ -151,6 +151,8 @@ class ItineraireParLaRouteAlgorithm(QgsProcessingAlgorithm):
         crs_projected = QgsCoordinateReferenceSystem("EPSG:2154")  # Lambert 93
         crs_wgs84 = QgsCoordinateReferenceSystem("EPSG:4326")  # WGS 84
         transform_to_projected = QgsCoordinateTransform(source1.sourceCrs(), crs_projected, context.transformContext())
+        transform_to_projected2 = QgsCoordinateTransform(source2.sourceCrs(), crs_projected, context.transformContext())
+
         transform_to_wgs84 = QgsCoordinateTransform(crs_projected, crs_wgs84, context.transformContext())
 
         # Transformer les entités dans un système de coordonnées projeté
@@ -158,7 +160,7 @@ class ItineraireParLaRouteAlgorithm(QgsProcessingAlgorithm):
             self.transformFeature(feature, transform_to_projected) for feature in source1.getFeatures()
         ]
         features2 = [
-            self.transformFeature(feature, transform_to_projected) for feature in source2.getFeatures()
+            self.transformFeature(feature, transform_to_projected2) for feature in source2.getFeatures()
         ]
 
         # Filtrer par champs communs si spécifiés
@@ -221,7 +223,7 @@ class ItineraireParLaRouteAlgorithm(QgsProcessingAlgorithm):
             for j, feature2 in enumerate(intersecting_features2):
                 if feedback.isCanceled():
                     break
-
+                time.sleep(0.222)
                 id2 = feature2[id_field2]
                 # Transformer les coordonnées pour l'API
                 point1 = transform_to_wgs84.transform(feature1.geometry().asPoint())

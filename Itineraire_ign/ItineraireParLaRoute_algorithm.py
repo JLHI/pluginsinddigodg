@@ -151,7 +151,8 @@ class ItineraireParLaRouteAlgorithm(QgsProcessingAlgorithm):
         crs_projected = QgsCoordinateReferenceSystem("EPSG:2154")  # Lambert 93
         crs_wgs84 = QgsCoordinateReferenceSystem("EPSG:4326")  # WGS 84
         transform_to_projected = QgsCoordinateTransform(source1.sourceCrs(), crs_projected, context.transformContext())
-        
+        transform_to_projected2 = QgsCoordinateTransform(source2.sourceCrs(), crs_projected, context.transformContext())
+
         transform_to_wgs84 = QgsCoordinateTransform(crs_projected, crs_wgs84, context.transformContext())
 
         # Transformer les entités dans un système de coordonnées projeté
@@ -159,7 +160,7 @@ class ItineraireParLaRouteAlgorithm(QgsProcessingAlgorithm):
             self.transformFeature(feature, transform_to_projected) for feature in source1.getFeatures()
         ]
         features2 = [
-            self.transformFeature(feature, transform_to_projected) for feature in source2.getFeatures()
+            self.transformFeature(feature, transform_to_projected2) for feature in source2.getFeatures()
         ]
 
         # Filtrer par champs communs si spécifiés
@@ -207,6 +208,8 @@ class ItineraireParLaRouteAlgorithm(QgsProcessingAlgorithm):
         # Calculer les itinéraires
         output_features = []  # Liste temporaire pour stocker les entités
         mode  = 'car' if mode == '1' else 'pedestrian'
+        feedback.pushInfo(f"Le Calcul démarre pour les {total_iterations} itinéraires ")
+
         for i, feature1 in enumerate(features1):
             id1 = feature1[id_field1]
             if buffer_size > 0:
@@ -235,9 +238,11 @@ class ItineraireParLaRouteAlgorithm(QgsProcessingAlgorithm):
                     response = self.makeRequest(request)
                     route_info = json.loads(response)
                     coordinates = route_info.get("geometry", {}).get("coordinates", [])
+
                     if coordinates:
                         route_points = [QgsPointXY(coord[0], coord[1]) for coord in coordinates]
                         line_geometry = QgsGeometry.fromPolylineXY(route_points)
+
                     else:
                         feedback.reportError(f"Aucune géométrie valide pour l'itinéraire entre {id1} et {id2}")
                         continue

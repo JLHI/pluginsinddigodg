@@ -14,8 +14,11 @@ from qgis.core import (
     QgsPointXY,
     QgsCoordinateTransform,
     QgsCoordinateReferenceSystem,
-    QgsProcessingParameterField,QgsProcessingParameterEnum,
-    QgsWkbTypes,QgsProcessingParameterBoolean,QgsProcessingParameterDefinition
+    QgsProcessingParameterField,
+    QgsProcessingParameterEnum,
+    QgsWkbTypes,
+    QgsProcessingParameterBoolean,
+    QgsProcessingParameterDefinition
 )
 from qgis.PyQt.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
 from PyQt5.QtCore import QVariant, QUrl
@@ -25,7 +28,7 @@ import time
 class ItineraireParLaRouteAlgorithm(QgsProcessingAlgorithm):
     """
     Plugin QGIS pour calculer des itinéraires entre points avec options de buffer,
-    reprojection, choix de champs d'identifiants, et champs communs.
+    reprojection, choix de champs d'identifiants, et filtrage par champs communs.
     """
 
     INPUT1 = 'INPUT1'
@@ -42,7 +45,7 @@ class ItineraireParLaRouteAlgorithm(QgsProcessingAlgorithm):
         """
         Définit les entrées et sorties de l'algorithme.
         """
-        # Couches en entrée
+        # Couche de départ
         self.addParameter(
             QgsProcessingParameterFeatureSource(
                 self.INPUT1,
@@ -50,7 +53,7 @@ class ItineraireParLaRouteAlgorithm(QgsProcessingAlgorithm):
                 [QgsProcessing.TypeVectorPoint]
             )
         )
-        # Champs d’identifiants pour chaque couche
+        # Champ d’ID dans la couche de départ
         self.addParameter(
             QgsProcessingParameterField(
                 self.ID_FIELD1,
@@ -58,6 +61,7 @@ class ItineraireParLaRouteAlgorithm(QgsProcessingAlgorithm):
                 parentLayerParameterName=self.INPUT1
             )
         )
+        # Couche d’arrivée
         self.addParameter(
             QgsProcessingParameterFeatureSource(
                 self.INPUT2,
@@ -65,34 +69,34 @@ class ItineraireParLaRouteAlgorithm(QgsProcessingAlgorithm):
                 [QgsProcessing.TypeVectorPoint]
             )
         )
+        # Champ d’ID dans la couche d’arrivée
         self.addParameter(
             QgsProcessingParameterField(
                 self.ID_FIELD2,
                 self.tr('Champ d’ID dans la couche 2'),
                 parentLayerParameterName=self.INPUT2
             )
-         )
+        )
         # Taille du buffer optionnel
         advanced_param_buffer = QgsProcessingParameterNumber(
-                self.BUFFER_SIZE,
-                self.tr('Taille du buffer (optionnel, en mètre)'),
-                defaultValue=0,
-                optional=True
-            )
+            self.BUFFER_SIZE,
+            self.tr('Taille du buffer (optionnel, en mètre)'),
+            defaultValue=0,
+            optional=True
+        )
         # Champs communs pour filtrer les entités
         advanced_param_communfield_1 = QgsProcessingParameterField(
-                self.COMMON_FIELD1,
-                self.tr('Champ commun dans la couche 1'),
-                parentLayerParameterName=self.INPUT1,
-                optional=True
-            )
+            self.COMMON_FIELD1,
+            self.tr('Champ commun dans la couche 1'),
+            parentLayerParameterName=self.INPUT1,
+            optional=True
+        )
         advanced_param_communfield_2 = QgsProcessingParameterField(
-
-                self.COMMON_FIELD2,
-                self.tr('Champ commun dans la couche 2'),
-                parentLayerParameterName=self.INPUT2,
-                optional=True
-            )
+            self.COMMON_FIELD2,
+            self.tr('Champ commun dans la couche 2'),
+            parentLayerParameterName=self.INPUT2,
+            optional=True
+        )
 
         self.addParameter(
             QgsProcessingParameterBoolean(
@@ -101,8 +105,8 @@ class ItineraireParLaRouteAlgorithm(QgsProcessingAlgorithm):
                 defaultValue=False
             )
         )
-        #Choix du mode
-        self.addParameter( 
+        # Choix du mode
+        self.addParameter(
             QgsProcessingParameterEnum(
                 self.CKB_MODE,
                 self.tr("Selectionnez le mode"),
@@ -111,7 +115,6 @@ class ItineraireParLaRouteAlgorithm(QgsProcessingAlgorithm):
                 defaultValue= 1    
             )
         )
-        
         # Couche de sortie
         self.addParameter(
             QgsProcessingParameterFeatureSink(
@@ -127,7 +130,6 @@ class ItineraireParLaRouteAlgorithm(QgsProcessingAlgorithm):
         self.addParameter(advanced_param_buffer)
         self.addParameter(advanced_param_communfield_1)
         self.addParameter(advanced_param_communfield_2)
-
 
     def processAlgorithm(self, parameters, context, feedback):
         """
@@ -152,40 +154,40 @@ class ItineraireParLaRouteAlgorithm(QgsProcessingAlgorithm):
         crs_wgs84 = QgsCoordinateReferenceSystem("EPSG:4326")  # WGS 84
         transform_to_projected = QgsCoordinateTransform(source1.sourceCrs(), crs_projected, context.transformContext())
         transform_to_projected2 = QgsCoordinateTransform(source2.sourceCrs(), crs_projected, context.transformContext())
-
         transform_to_wgs84 = QgsCoordinateTransform(crs_projected, crs_wgs84, context.transformContext())
 
         # Transformer les entités dans un système de coordonnées projeté
-        features1 = [
-            self.transformFeature(feature, transform_to_projected) for feature in source1.getFeatures()
-        ]
-        features2 = [
-            self.transformFeature(feature, transform_to_projected2) for feature in source2.getFeatures()
-        ]
+        features1 = [self.transformFeature(feature, transform_to_projected) for feature in source1.getFeatures()]
+        features2 = [self.transformFeature(feature, transform_to_projected2) for feature in source2.getFeatures()]
 
-        # Filtrer par champs communs si spécifiés
+        # Si les champs communs sont renseignés, on ne garde que les entités avec une valeur non nulle
         if common_field1 and common_field2:
-            features1 = [
-                feature for feature in features1 if feature[common_field1] is not None
-            ]
-            common_field_map2 = {
-                feature[common_field2]: feature for feature in features2 if feature[common_field2] is not None
-            }
-            features1 = [
-                feature for feature in features1 if feature[common_field1] in common_field_map2
-            ]
-            features2 = [
-                common_field_map2[value] for value in {f[common_field1] for f in features1}
-            ]
+            feedback.pushInfo("Filtrage par champ en commun")
+            features1 = [feature for feature in features1 if feature[common_field1] is not None]
+            features2 = [feature for feature in features2 if feature[common_field2] is not None]
+        feedback.pushInfo(f"Avant association : {len(features1)} points de départ et {len(features2)} points d’arrivée.")
 
-        # Calculer le nombre total d'itérations
-        total_iterations = sum(
-            len(features2) if buffer_size == 0 else len(
-                [f for f in features2 if feature.geometry().buffer(buffer_size, 10).intersects(f.geometry())]
+        # Calcul du nombre total d'itérations en fonction du filtrage par champ commun
+        if common_field1 and common_field2:
+            total_iterations = 0
+            for f1 in features1:
+                # Pour chaque point de départ, on ne garde que les points d’arrivée ayant le même id
+                matches = [f for f in features2 if f[common_field2] == f1[common_field1]]
+                # Si un buffer est défini, on applique en plus le test spatial
+                if buffer_size > 0:
+                    buffer_geom = f1.geometry().buffer(buffer_size, 10)
+                    matches = [f for f in matches if buffer_geom.intersects(f.geometry())]
+                total_iterations += len(matches)
+        else:
+            total_iterations = sum(
+                len(features2) if buffer_size == 0 else len(
+                    [f for f in features2 if feature.geometry().buffer(buffer_size, 10).intersects(f.geometry())]
+                )
+                for feature in features1
             )
-            for feature in features1
-        )
         current_iteration = 0
+
+        feedback.pushInfo(f"Le calcul démarre pour {total_iterations} itinéraires.")
 
         # Définir les champs de sortie
         fields = QgsFields()
@@ -195,42 +197,39 @@ class ItineraireParLaRouteAlgorithm(QgsProcessingAlgorithm):
         fields.append(QgsField('duration', QVariant.Double))
 
         # Créer la couche de sortie
-        sink, dest_id = self.parameterAsSink(
-            parameters,
-            self.OUTPUT,
-            context,
-            fields,
-            QgsWkbTypes.LineString
-        )
+        sink, dest_id = self.parameterAsSink(parameters, self.OUTPUT, context, fields, QgsWkbTypes.LineString)
 
-
-        last_progress = 0
-        # Calculer les itinéraires
         output_features = []  # Liste temporaire pour stocker les entités
-        mode  = 'car' if mode == '1' else 'pedestrian'
-        feedback.pushInfo(f"Le Calcul démarre pour les {total_iterations} itinéraires ")
-
+        mode = 'car' if mode == '1' else 'pedestrian'
+        last_progress = 0 
+        # Boucle principale
         for i, feature1 in enumerate(features1):
             id1 = feature1[id_field1]
-            if buffer_size > 0:
-                # Filtrer les entités de la couche 2 avec un buffer
-                buffer_geom = feature1.geometry().buffer(buffer_size, 10)
-                intersecting_features2 = [
-                    feature2 for feature2 in features2 if buffer_geom.intersects(feature2.geometry())
-                ]
+            # Détermination des points d’arrivée à traiter pour ce point de départ
+            if common_field1 and common_field2:
+                # Sélectionner uniquement les points d’arrivée avec le même id
+                matches = [f for f in features2 if f[common_field2] == feature1[common_field1]]
+                if buffer_size > 0:
+                    buffer_geom = feature1.geometry().buffer(buffer_size, 10)
+                    matches = [f for f in matches if buffer_geom.intersects(f.geometry())]
+                intersecting_features2 = matches
             else:
-                # Pas de buffer : utiliser toutes les entités
-                intersecting_features2 = features2
+                # Si pas de champ commun, appliquer éventuellement le filtre spatial
+                if buffer_size > 0:
+                    buffer_geom = feature1.geometry().buffer(buffer_size, 10)
+                    intersecting_features2 = [f for f in features2 if buffer_geom.intersects(f.geometry())]
+                else:
+                    intersecting_features2 = features2
 
+            # Pour chaque correspondance trouvée, calculer l'itinéraire
             for j, feature2 in enumerate(intersecting_features2):
                 if feedback.isCanceled():
                     break
                 time.sleep(0.222)
                 id2 = feature2[id_field2]
-                # Transformer les coordonnées pour l'API
+                # Transformation des coordonnées pour l'API
                 point1 = transform_to_wgs84.transform(feature1.geometry().asPoint())
                 point2 = transform_to_wgs84.transform(feature2.geometry().asPoint())
-
                 url = QUrl(f"https://data.geopf.fr/navigation/itineraire?resource=bdtopo-osrm&profile={mode}&start={point1.x()},{point1.y()}&end={point2.x()},{point2.y()}")
                 request = QNetworkRequest(url)
 
@@ -238,16 +237,14 @@ class ItineraireParLaRouteAlgorithm(QgsProcessingAlgorithm):
                     response = self.makeRequest(request)
                     route_info = json.loads(response)
                     coordinates = route_info.get("geometry", {}).get("coordinates", [])
-
                     if coordinates:
                         route_points = [QgsPointXY(coord[0], coord[1]) for coord in coordinates]
                         line_geometry = QgsGeometry.fromPolylineXY(route_points)
-
                     else:
                         feedback.reportError(f"Aucune géométrie valide pour l'itinéraire entre {id1} et {id2}")
                         continue
                 except Exception as e:
-                    feedback.reportError(f"Échec de la récupération de l'itinéraire : {e}")
+                    feedback.reportError(f"Échec de la récupération de l'itinéraire entre {id1} et {id2} : {e}")
                     continue
 
                 new_feature = QgsFeature()
@@ -256,9 +253,9 @@ class ItineraireParLaRouteAlgorithm(QgsProcessingAlgorithm):
                     id1,
                     id2,
                     route_info.get("distance", 0),
-                    route_info.get("duration", 0)/60
+                    route_info.get("duration", 0) / 60
                 ])
-                output_features.append(new_feature)  # Ajouter à la liste temporaire
+                output_features.append(new_feature)
 
                 # Mettre à jour la progression
                 current_iteration += 1
@@ -268,18 +265,15 @@ class ItineraireParLaRouteAlgorithm(QgsProcessingAlgorithm):
                     feedback.pushInfo(f"Progression : {progress}% - {current_iteration}/{total_iterations} itérations effectuées")
                     last_progress = progress
 
-        # Filtrer les résultats pour conserver uniquement les distances minimales
+        # Optionnel : filtrer pour ne garder que l'itinéraire de distance minimale par point de départ
         if filter_min_distance:
             feedback.pushInfo("Filtrage des résultats pour conserver uniquement les distances minimales par id_input1...")
             min_distance_map = {}
             for feature in output_features:
-                id1 = feature[0]  # Accéder à id_field1 via attribute()
-                distance = feature[2]   # Assure-toi que 'distance' est un champ dans la sortie
-
+                id1 = feature[0]
+                distance = feature[2]
                 if id1 not in min_distance_map or distance < min_distance_map[id1]['distance']:
                     min_distance_map[id1] = {'feature': feature, 'distance': distance}
-
-            # Remplacer les entités par celles filtrées
             output_features = [data['feature'] for data in min_distance_map.values()]
 
         # Écrire les entités dans le sink
@@ -333,30 +327,15 @@ class ItineraireParLaRouteAlgorithm(QgsProcessingAlgorithm):
         return ItineraireParLaRouteAlgorithm()
     
     def shortHelpString(self):
-        """
-        Retourne le texte d'aide pour l'outil.
-        """
         return """
             <h3>Outil Inddigo : Itinéraire par la route</h3>
             <p>Ce plugin permet de calculer des itinéraires routiers entre des points de départ et d'arrivée provenant de deux couches de points distinctes.</p>
             <h4>Fonctionnalités principales :</h4>
             <ul>
                 <li>Calcul des itinéraires entre deux couches de points via l'API IGN.</li>
-                <li>Option de filtrage par champs communs entre les deux couches.</li>
+                <li>Option de filtrage par champs communs (pour ne traiter que les itinéraires entre points ayant le même identifiant).</li>
                 <li>Ajout d'un buffer optionnel pour limiter les calculs d'itinéraires aux entités proches.</li>
                 <li>Choix de conserver uniquement l'itinéraire avec la distance minimale pour chaque point de départ.</li>
-            </ul>
-            <h4>Paramètres :</h4>
-            <ul>
-                <li><b>Couche d’entrée 1 (Points de départ) :</b> La première couche de points utilisée comme points de départ.</li>
-                <li><b>Champ d’ID dans la couche 1 :</b> Champ identifiant les entités de la première couche.</li>
-                <li><b>Couche d’entrée 2 (Points d’arrivée) :</b> La deuxième couche de points utilisée comme points d’arrivée.</li>
-                <li><b>Champ d’ID dans la couche 2 :</b> Champ identifiant les entités de la deuxième couche.</li>
-                <li><b>Choix du mode :</b> Pieton ou voiture.</li>
-                <li><b>Taille du buffer (optionnel) :</b> Taille du buffer pour limiter les calculs d’itinéraires.</li>
-                <li><b>Champs communs (optionnels) :</b> Champs à utiliser pour filtrer les points des deux couches.</li>
-                <li><b>Conserver uniquement la ligne avec la distance minimale :</b> Permet de n’exporter que l’itinéraire le plus court pour chaque point de départ.</li>
-                <li><b>Couche de sortie (Itinéraires) :</b> La couche résultante contenant les itinéraires calculés.</li>
             </ul>
             <h4>Résultats :</h4>
             <p>Le plugin génère une couche contenant les itinéraires sous forme de lignes, avec les attributs suivants :</p>

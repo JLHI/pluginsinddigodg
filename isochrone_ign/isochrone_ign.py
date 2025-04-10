@@ -143,7 +143,7 @@ class IsochroneIgnAlgorithm(QgsProcessingAlgorithm):
                 geom = feature.geometry()
 
                 # Vérification : la géométrie doit être non vide et un Point
-                if geom.isEmpty() or geom.wkbType() != QgsWkbTypes.Point:
+                if geom.isEmpty() or QgsWkbTypes.flatType(geom.wkbType()) != QgsWkbTypes.Point:
                     feedback.reportError(f"Entité {feature.id()} ignorée : géométrie invalide ou non ponctuelle.")
                     continue
 

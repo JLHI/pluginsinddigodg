@@ -37,6 +37,7 @@ class ItineraireParLaRouteAlgorithm(QgsProcessingAlgorithm):
     ID_FIELD1 = 'ID_FIELD1'
     ID_FIELD2 = 'ID_FIELD2'
     CKB_MODE = 'CKB_MODE'
+    CKB_OPTI = 'CKB_OPTI'
     COMMON_FIELD1 = 'COMMON_FIELD1'
     COMMON_FIELD2 = 'COMMON_FIELD2'
     OUTPUT = 'OUTPUT'
@@ -105,6 +106,16 @@ class ItineraireParLaRouteAlgorithm(QgsProcessingAlgorithm):
                 defaultValue=False
             )
         )
+          # Choix de l'optimisation
+        self.addParameter(
+            QgsProcessingParameterEnum(
+                self.CKB_OPTI,
+                self.tr("Selectionnez l'optimisation"),
+                options=["Le plus rapide", "Le plus court"],
+                allowMultiple=False,  
+                defaultValue= 1    
+            )
+        )
         # Choix du mode
         self.addParameter(
             QgsProcessingParameterEnum(
@@ -142,6 +153,7 @@ class ItineraireParLaRouteAlgorithm(QgsProcessingAlgorithm):
         id_field1 = self.parameterAsString(parameters, self.ID_FIELD1, context)
         id_field2 = self.parameterAsString(parameters, self.ID_FIELD2, context)
         mode = self.parameterAsString(parameters, self.CKB_MODE, context)
+        opti = self.parameterAsString(parameters, self.CKB_OPTI, context)
         common_field1 = self.parameterAsString(parameters, self.COMMON_FIELD1, context)
         common_field2 = self.parameterAsString(parameters, self.COMMON_FIELD2, context)
         filter_min_distance = self.parameterAsBoolean(parameters, 'FILTER_MIN_DISTANCE', context)
@@ -201,6 +213,8 @@ class ItineraireParLaRouteAlgorithm(QgsProcessingAlgorithm):
 
         output_features = []  # Liste temporaire pour stocker les entités
         mode = 'car' if mode == '1' else 'pedestrian'
+        opti = 'shortest' if opti == '1' else 'fastest'
+
         last_progress = 0 
         # Boucle principale
         for i, feature1 in enumerate(features1):
@@ -230,7 +244,8 @@ class ItineraireParLaRouteAlgorithm(QgsProcessingAlgorithm):
                 # Transformation des coordonnées pour l'API
                 point1 = transform_to_wgs84.transform(feature1.geometry().asPoint())
                 point2 = transform_to_wgs84.transform(feature2.geometry().asPoint())
-                url = QUrl(f"https://data.geopf.fr/navigation/itineraire?resource=bdtopo-osrm&profile={mode}&start={point1.x()},{point1.y()}&end={point2.x()},{point2.y()}")
+             
+                url = QUrl(f"https://data.geopf.fr/navigation/itineraire?resource=bdtopo-pgr&profile={mode}&start={point1.x()},{point1.y()}&end={point2.x()},{point2.y()}&optimization={opti}")
                 request = QNetworkRequest(url)
 
                 try:

@@ -37,8 +37,9 @@ from .Arbre_de_rabattement.Arbre_de_rabattement_algorithm import ArbreDeRabattem
 from .gtfs_stops_to_routes_ign.gtfs_stops_to_route_ign import GtfsRouteIgn
 from .Itineraire_ign.ItineraireParLaRoute_algorithm import ItineraireParLaRouteAlgorithm
 from .isochrone_ign.isochrone_ign import IsochroneIgnAlgorithm
-from .TcIsoFromGtfs.tcisofromgtfs import GtfsIsochrone
-
+from .flux_insee.flux_insee import FluxInseeAlgorithm
+#from .TcIsoFromGtfs.tcisofromgtfs import GtfsIsochrone
+from .teom.teom import CalculTEOMAlgorithm
 class PluginsInddigoDGProvider(QgsProcessingProvider):
 
     def __init__(self):
@@ -64,6 +65,8 @@ class PluginsInddigoDGProvider(QgsProcessingProvider):
         self.addAlgorithm(GtfsRouteIgn())
         self.addAlgorithm(ItineraireParLaRouteAlgorithm())
         self.addAlgorithm(IsochroneIgnAlgorithm())
+        self.addAlgorithm(CalculTEOMAlgorithm())
+        self.addAlgorithm(FluxInseeAlgorithm())
         #self.addAlgorithm(GtfsIsochrone())
 
 

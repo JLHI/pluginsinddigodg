@@ -265,4 +265,9 @@ class CalculTEOMAlgorithm(QgsProcessingAlgorithm):
           <li><b>Schéma</b> : schéma contenant les tables TEOM, il peut être différent de "teom"</li>
           <li><b>Fichier Excel de sortie</b> : chemin du fichier Excel
           (.xlsx) à générer.</li>        
+        
+        <h3>Attention</h3>
+                 <p>Les montants de TEOM sont claculés à partir d'un taux générique (0.1224), mais ce taux est en principe unique à chaque commune
+                     puis multiplier par une autre taxe fixée par l'état : 1.08</p>       
+
         """)

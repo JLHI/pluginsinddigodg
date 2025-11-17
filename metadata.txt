@@ -6,14 +6,14 @@
 name=PluginsInddigoDG
 qgisMinimumVersion=3.0
 description=Les plugins non restreint du pôle DG d'Inddigo
-version=0.112
-author=JLHI
+version=0.201
+author=JL HUMBERT, C GARCIA, R PELLICIER
 email=jl.humbert@inddigo.com
 
 about=Les plugins non restreint du pôle DG d'Inddigo
 
-tracker=http://bugs
-repository=http://repo
+tracker=https://github.com/JLHI/pluginsinddigodg/issues
+repository=https://github.com/JLHI/pluginsinddigodg
 # End of mandatory metadata
 
 # Recommended items:
@@ -23,7 +23,7 @@ hasProcessingProvider=yes
 # changelog=
 
 # Tags are comma separated with spaces allowed
-tags=python
+tags=python,inddigo
 
 homepage=http://homepage
 category=Analysis

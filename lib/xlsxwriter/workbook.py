@@ -19,7 +19,7 @@ from typing import IO, Any, AnyStr, Dict, List, Literal, Optional, Union
 from warnings import warn
 from zipfile import ZIP_DEFLATED, LargeZipFile, ZipFile, ZipInfo
 
-from xlsxwriter.image import Image
+from .image import Image
 
 # Package imports.
 from . import xmlwriter

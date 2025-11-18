@@ -11,7 +11,7 @@ import re
 from typing import Dict, Optional, Tuple, Union
 from warnings import warn
 
-from xlsxwriter.color import Color
+from .color import Color
 
 COL_NAMES: Dict[int, str] = {}
 

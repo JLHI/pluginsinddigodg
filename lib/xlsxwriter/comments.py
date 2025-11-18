@@ -9,7 +9,7 @@
 
 from typing import Dict, List, Optional, Union
 
-from xlsxwriter.color import Color
+from .color import Color
 
 from . import xmlwriter
 from .utility import _preserve_whitespace, xl_cell_to_rowcol, xl_rowcol_to_cell

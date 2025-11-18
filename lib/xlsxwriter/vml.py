@@ -8,8 +8,8 @@
 #
 
 # Package imports.
-from xlsxwriter.comments import CommentType
-from xlsxwriter.image import Image
+from .comments import CommentType
+from .image import Image
 
 from . import xmlwriter
 

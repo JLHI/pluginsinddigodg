@@ -9,8 +9,8 @@
 
 from enum import Enum
 
-from xlsxwriter.color import Color
-from xlsxwriter.url import Url
+from .color import Color
+from .url import Url
 
 from . import xmlwriter
 from .shape import Shape

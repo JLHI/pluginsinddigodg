@@ -9,7 +9,7 @@
 import copy
 from warnings import warn
 
-from xlsxwriter.color import Color
+from .color import Color
 
 
 class Shape:

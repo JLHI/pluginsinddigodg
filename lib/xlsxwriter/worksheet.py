@@ -24,12 +24,12 @@ from math import isinf, isnan
 from typing import Any, Dict, List, Literal, Optional, Union
 from warnings import warn
 
-from xlsxwriter.chart import Chart
-from xlsxwriter.color import Color
-from xlsxwriter.comments import CommentType
-from xlsxwriter.image import Image
-from xlsxwriter.url import Url, UrlTypes
-from xlsxwriter.vml import ButtonType
+from .chart import Chart
+from .color import Color
+from .comments import CommentType
+from .image import Image
+from .url import Url, UrlTypes
+from .vml import ButtonType
 
 # Package imports.
 from . import xmlwriter

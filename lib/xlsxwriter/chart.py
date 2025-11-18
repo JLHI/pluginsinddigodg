@@ -12,7 +12,7 @@ import re
 from typing import Any, Dict, Optional
 from warnings import warn
 
-from xlsxwriter.color import Color, ColorTypes
+from .color import Color, ColorTypes
 
 from . import xmlwriter
 from .chart_title import ChartTitle

@@ -9,7 +9,7 @@
 
 from typing import Any, Dict, Optional
 
-from xlsxwriter.chart import Chart
+from .chart import Chart
 
 from . import worksheet
 from .drawing import Drawing

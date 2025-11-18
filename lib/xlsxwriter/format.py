@@ -11,7 +11,7 @@
 from typing import Literal, Union
 from warnings import warn
 
-from xlsxwriter.color import Color
+from .color import Color
 
 from . import xmlwriter
 

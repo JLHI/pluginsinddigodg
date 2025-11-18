@@ -7,7 +7,7 @@
 # Copyright (c) 2013-2025, John McNamara, jmcnamara@cpan.org
 #
 
-from xlsxwriter.image import Image
+from .image import Image
 
 from . import xmlwriter
 

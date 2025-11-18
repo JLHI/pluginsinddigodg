@@ -3,7 +3,7 @@
 Export Excel du plugin flux_insee.
 Utilise xlsxwriter.
 """
-from ..lib import xlsxwriter
+import xlsxwriter
 from PyQt5.QtCore import QVariant
 
 

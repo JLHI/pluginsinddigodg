@@ -14,7 +14,7 @@ from pathlib import Path
 from struct import unpack
 from typing import Tuple, Union
 
-from xlsxwriter.url import Url
+from .url import Url
 
 from .exceptions import UndefinedImageSize, UnsupportedImageFormat
 

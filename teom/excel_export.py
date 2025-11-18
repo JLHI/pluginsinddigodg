@@ -7,7 +7,7 @@ Reproduit EXACTEMENT les couleurs et le rendu de l'ancienne version openpyxl.
 import os
 import shutil
 import tempfile
-from ..lib import xlsxwriter
+import xlsxwriter
 from qgis.core import QgsProcessingException
 from qgis.PyQt.QtCore import QVariant
 

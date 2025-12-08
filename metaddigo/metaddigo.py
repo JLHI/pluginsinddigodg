@@ -37,30 +37,7 @@ class MetaddigoExportMetadataAlgorithm(QgsProcessingAlgorithm):
         )
 
 
-    def name(self):
-        return 'export_metadonnees'
-
-    def displayName(self):
-        return self.tr('Export métadonnées vers Excel')
-
-    def group(self):
-        return self.tr('Metaddigo')
-
-    def groupId(self):
-        return 'metaddigo'
-
-    def shortHelpString(self):
-        return self.tr(
-            'Exporte les métadonnées des couches du projet courant vers un fichier Excel (.xlsx).\n'
-            'Feuille COUCHES : nom, groupe, type, emprise, SCR, droits.\n'
-            'Feuille CHAMPS : liste des champs pour les couches vecteur.'
-        )
-
-    def createInstance(self):
-        return MetaddigoExportMetadataAlgorithm()
-
-    def tr(self, s):
-        return QCoreApplication.translate('Processing', s)
+    
 
     # ------------------------- helpers -------------------------
     def get_layer_group(self, layer_id):
@@ -347,3 +324,28 @@ class MetaddigoExportMetadataAlgorithm(QgsProcessingAlgorithm):
         feedback.pushInfo(self.tr(f'Export Excel terminé : {output}'))
 
         return {self.OUTPUT: output}
+    
+    def name(self):
+        return 'export_metadonnees'
+
+    def displayName(self):
+        return self.tr('Export métadonnées vers Excel')
+
+    def group(self):
+        return self.tr('Metaddigo')
+
+    def groupId(self):
+        return 'metaddigo'
+
+    def shortHelpString(self):
+        return self.tr(
+            'Exporte les métadonnées des couches du projet courant vers un fichier Excel (.xlsx).\n'
+            'Feuille COUCHES : nom, groupe, type, emprise, SCR, droits.\n'
+            'Feuille CHAMPS : liste des champs pour les couches vecteur.'
+        )
+
+    def createInstance(self):
+        return MetaddigoExportMetadataAlgorithm()
+
+    def tr(self, s):
+        return QCoreApplication.translate('Processing', s)

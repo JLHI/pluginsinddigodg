@@ -45,8 +45,9 @@ if cmd_folder not in sys.path:
 
 class PluginsInddigoDGPlugin(object):
 
-    def __init__(self):
-
+    def __init__(self, iface=None):
+        """Constructeur du plugin. `iface` est optionnel pour compatibilité."""
+        self.iface = iface
         self.provider = None
 
     def initProcessing(self):

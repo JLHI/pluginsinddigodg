@@ -17,6 +17,7 @@ from .Itineraire_ign.ItineraireParLaRoute_algorithm import ItineraireParLaRouteA
 from .isochrone_ign.isochrone_ign import IsochroneIgnAlgorithm
 from .flux_insee.flux_insee import FluxInseeAlgorithm
 from .teom.teom import CalculTEOMAlgorithm
+from .metaddigo.metaddigo import MetaddigoExportMetadataAlgorithm
 
 
 class PluginsInddigoDGProvider(QgsProcessingProvider):
@@ -60,20 +61,8 @@ class PluginsInddigoDGProvider(QgsProcessingProvider):
         self.addAlgorithm(IsochroneIgnAlgorithm())
         self.addAlgorithm(CalculTEOMAlgorithm())
         self.addAlgorithm(FluxInseeAlgorithm())
+        self.addAlgorithm(MetaddigoExportMetadataAlgorithm())
 
-        # ---- Ajout de Metaddigo ----
-        try:
-            from .metaddigo.metaddigo import MetaddigoExportMetadataAlgorithm
-            self.addAlgorithm(MetaddigoExportMetadataAlgorithm())
-            QgsMessageLog.logMessage(
-                "MetaddigoExportMetadataAlgorithm chargé avec succès.",
-                'PluginsInddigoDG', Qgis.Info
-            )
-        except Exception as e:
-            QgsMessageLog.logMessage(
-                f"Erreur lors du chargement de Metaddigo : {e}",
-                'PluginsInddigoDG', Qgis.Warning
-            )
 
     # --------------------------
     #  INFORMATIONS DU PROVIDER

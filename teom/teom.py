@@ -27,10 +27,8 @@ __copyright__ = '(C) 2022 by Romain PELLICIER'
 
 # -*- coding: utf-8 -*-
 import os
-import inspect
 from datetime import datetime
 
-from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtCore import QCoreApplication
 
 from qgis.core import (

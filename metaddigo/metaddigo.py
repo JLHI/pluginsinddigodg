@@ -27,7 +27,7 @@ class MetaddigoExportMetadataAlgorithm(QgsProcessingAlgorithm):
     """Algorithme Processing : export métadonnées -> .xlsx"""
 
     OUTPUT = 'OUTPUT'
-    def initAlgorithm(self, config=None):
+    def initAlgorithm(self, config):
         self.addParameter(
             QgsProcessingParameterFileDestination(
                 self.OUTPUT,

@@ -334,8 +334,7 @@ class MetaddigoExportMetadataAlgorithm(QgsProcessingAlgorithm):
     def group(self):
         return self.tr('Metaddigo')
 
-    def groupId(self):
-        return 'metaddigo'
+
 
     def shortHelpString(self):
         return self.tr(

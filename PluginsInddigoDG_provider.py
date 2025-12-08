@@ -40,6 +40,7 @@ from .isochrone_ign.isochrone_ign import IsochroneIgnAlgorithm
 from .flux_insee.flux_insee import FluxInseeAlgorithm
 #from .TcIsoFromGtfs.tcisofromgtfs import GtfsIsochrone
 from .teom.teom import CalculTEOMAlgorithm
+from .metaddigo.metaddigo import MetaddigoExportMetadataAlgorithm
 class PluginsInddigoDGProvider(QgsProcessingProvider):
 
     def __init__(self):
@@ -68,6 +69,7 @@ class PluginsInddigoDGProvider(QgsProcessingProvider):
         self.addAlgorithm(CalculTEOMAlgorithm())
         self.addAlgorithm(FluxInseeAlgorithm())
         #self.addAlgorithm(GtfsIsochrone())
+        self.addAlgorithm(MetaddigoExportMetadataAlgorithm())
 
 
 

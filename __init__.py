@@ -24,10 +24,9 @@ __author__ = 'JLHI'
 __date__ = '2024-11-22'
 __copyright__ = '(C) 2024'
 
-# 🔥 2) LA FONCTION classFactory PEUT MAINTENANT IMPORTER TON PLUGIN
 def classFactory(iface):
     """
     Charge la classe principale du plugin
     """
     from .PluginsInddigoDG import PluginsInddigoDGPlugin
-    return PluginsInddigoDGPlugin()
+    return PluginsInddigoDGPlugin(iface)

@@ -10,7 +10,10 @@ Feuille 2 : CHAMPS (infos des attributs des couches vecteur)
 """
 
 import os
-import xlsxwriter
+try:
+    import xlsxwriter
+except Exception:
+    xlsxwriter = None
 
 from qgis.PyQt.QtCore import QCoreApplication
 from qgis.core import (

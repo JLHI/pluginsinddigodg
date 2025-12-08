@@ -22,8 +22,17 @@ if "-" in plugin_dir:
         current = types.ModuleType(__name__)
         sys.modules[__name__] = current
 
-    # Register an alias module name so importlib can find the package by the safe name
+    # Register alias module names so importlib can find the package under
+    # different names that GitHub or installers might produce.
+    # e.g. 'pluginsinddigodg-main' -> 'pluginsinddigodg_main' and also
+    # a clean base name 'pluginsinddigodg' (without suffix).
     sys.modules.setdefault(safe_name, current)
+    # also register the base name without any '-main' suffix
+    base_name = safe_name
+    if base_name.endswith('_main'):
+        base_name_no_main = base_name[:-5]
+        if base_name_no_main:
+            sys.modules.setdefault(base_name_no_main, current)
 
     # Adjust __package__ so relative imports inside the package work when aliased
     try:

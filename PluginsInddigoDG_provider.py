@@ -40,9 +40,9 @@ from .isochrone_ign.isochrone_ign import IsochroneIgnAlgorithm
 from .flux_insee.flux_insee import FluxInseeAlgorithm
 #from .TcIsoFromGtfs.tcisofromgtfs import GtfsIsochrone
 from .teom.teom import CalculTEOMAlgorithm
-# Metaddigo is imported dynamically inside loadAlgorithms() to avoid
-# breaking the entire provider if the module cannot be imported
-from qgis.core import QgsMessageLog, Qgis
+
+from .metaddigo.metaddigo import MetaddigoExportMetadataAlgorithm
+
 class PluginsInddigoDGProvider(QgsProcessingProvider):
 
     def __init__(self):
@@ -70,14 +70,9 @@ class PluginsInddigoDGProvider(QgsProcessingProvider):
         self.addAlgorithm(IsochroneIgnAlgorithm())
         self.addAlgorithm(CalculTEOMAlgorithm())
         self.addAlgorithm(FluxInseeAlgorithm())
-        # Try to load Metaddigo dynamically and log any import error
-        try:
-            from .metaddigo.metaddigo import MetaddigoExportMetadataAlgorithm
-            self.addAlgorithm(MetaddigoExportMetadataAlgorithm())
-        except Exception as e:
-            QgsMessageLog.logMessage(f"Metaddigo algorithm not loaded: {e}", 'PluginsInddigoDG', Qgis.Warning)
-        #self.addAlgorithm(GtfsIsochrone())
         self.addAlgorithm(MetaddigoExportMetadataAlgorithm())
+
+ 
 
 
 

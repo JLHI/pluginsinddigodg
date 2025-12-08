@@ -45,15 +45,15 @@ if cmd_folder not in sys.path:
 
 class PluginsInddigoDGPlugin(object):
 
-    def __init__(self, iface=None):
+    def __init__(self):
         """Constructeur du plugin.
 
         QGIS appelle `classFactory(iface)` et s'attend à pouvoir instancier
         la classe en lui passant l'interface `iface`. On accepte donc `iface`
         en argument, avec valeur par défaut `None` pour rester compatible.
         """
-        self.iface = iface
         self.provider = None
+
 
     def initProcessing(self):
         """Init Processing provider for QGIS >= 3.8."""

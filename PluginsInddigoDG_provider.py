@@ -68,6 +68,7 @@ class PluginsInddigoDGProvider(QgsProcessingProvider):
         self.addAlgorithm(IsochroneIgnAlgorithm())
         self.addAlgorithm(CalculTEOMAlgorithm())
         self.addAlgorithm(FluxInseeAlgorithm())
+        self.addAlgorithm(MetaddigoExportMetadataAlgorithm())
         #self.addAlgorithm(GtfsIsochrone())
         self.addAlgorithm(MetaddigoExportMetadataAlgorithm())
 

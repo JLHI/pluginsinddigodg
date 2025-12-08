@@ -332,7 +332,10 @@ class MetaddigoExportMetadataAlgorithm(QgsProcessingAlgorithm):
         return self.tr('Export métadonnées vers Excel')
 
     def group(self):
-        return self.tr('Metaddigo')
+        return "Metaddigo"
+
+    def groupId(self):
+        return "metaddigo"
 
 
 

@@ -31,25 +31,7 @@ class PluginsInddigoDGProvider(QgsProcessingProvider):
     def unload(self):
         pass
 
-    # --------------------------
-    #  GROUPES DU PROVIDER
-    # --------------------------
-    def groups(self):
-        """
-        Déclare les groupes visibles dans la boîte Processing.
-        IMPORTANT : doit inclure TOUS les groupes utilisés par les algorithmes.
-        """
-        return ["Metaddigo"]
-
-    def groupId(self, name):
-        """
-        Retourne l'ID interne du groupe.
-        """
-        if name == "Metaddigo":
-            return "metaddigo"
-        return ""
-
-    # --------------------------
+       # --------------------------
     #  ALGORITHMES DU PROVIDER
     # --------------------------
     def loadAlgorithms(self):

@@ -30,7 +30,7 @@ __copyright__ = '(C) 2024 by JLHI'
 
 __revision__ = '$Format:%H$'
 
-from qgis.core import QgsProcessingProvider
+from qgis.core import QgsProcessingProvider, QgsMessageLog, Qgis
 #from .PluginsInddigoDG_algorithm import PluginsInddigoDGAlgorithm
 
 from .Arbre_de_rabattement.Arbre_de_rabattement_algorithm import ArbreDeRabattementAlgorithm
@@ -41,7 +41,6 @@ from .flux_insee.flux_insee import FluxInseeAlgorithm
 #from .TcIsoFromGtfs.tcisofromgtfs import GtfsIsochrone
 from .teom.teom import CalculTEOMAlgorithm
 
-from .metaddigo.metaddigo import MetaddigoExportMetadataAlgorithm
 
 class PluginsInddigoDGProvider(QgsProcessingProvider):
 
@@ -70,33 +69,34 @@ class PluginsInddigoDGProvider(QgsProcessingProvider):
         self.addAlgorithm(IsochroneIgnAlgorithm())
         self.addAlgorithm(CalculTEOMAlgorithm())
         self.addAlgorithm(FluxInseeAlgorithm())
-            # Try to load Metaddigo dynamically and log any import error. Use a
-            # fallback that imports the module by file path when package naming
-            # (e.g. 'pluginsinddigodg-main') prevents normal imports.
+
+        # Try to load Metaddigo dynamically and log any import error. Use a
+        # fallback that imports the module by file path when package naming
+        # (e.g. 'pluginsinddigodg-main') prevents normal imports.
+        try:
             try:
-                try:
-                    # Preferred: relative import within the package
-                    from .metaddigo.metaddigo import MetaddigoExportMetadataAlgorithm
-                    self.addAlgorithm(MetaddigoExportMetadataAlgorithm())
-                except Exception:
-                    # Fallback: import by file path to avoid issues with package name
-                    import importlib.util
-                    import os
-                    provider_dir = os.path.dirname(__file__)
-                    metapath = os.path.join(provider_dir, 'metaddigo', 'metaddigo.py')
-                    if os.path.exists(metapath):
-                        spec = importlib.util.spec_from_file_location('pluginsinddigodg.metaddigo.metaddigo', metapath)
-                        mod = importlib.util.module_from_spec(spec)
-                        spec.loader.exec_module(mod)
-                        cls = getattr(mod, 'MetaddigoExportMetadataAlgorithm', None)
-                        if cls:
-                            self.addAlgorithm(cls())
-                        else:
-                            raise ImportError('MetaddigoExportMetadataAlgorithm not found in module')
+                # Preferred: relative import within the package
+                from .metaddigo.metaddigo import MetaddigoExportMetadataAlgorithm
+                self.addAlgorithm(MetaddigoExportMetadataAlgorithm())
+            except Exception:
+                # Fallback: import by file path to avoid issues with package name
+                import importlib.util
+                import os
+                provider_dir = os.path.dirname(__file__)
+                metapath = os.path.join(provider_dir, 'metaddigo', 'metaddigo.py')
+                if os.path.exists(metapath):
+                    spec = importlib.util.spec_from_file_location('pluginsinddigodg.metaddigo.metaddigo', metapath)
+                    mod = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(mod)
+                    cls = getattr(mod, 'MetaddigoExportMetadataAlgorithm', None)
+                    if cls:
+                        self.addAlgorithm(cls())
                     else:
-                        raise ImportError(f'Metaddigo file not found: {metapath}')
-            except Exception as e:
-                QgsMessageLog.logMessage(f"Metaddigo algorithm not loaded: {e}", 'PluginsInddigoDG', Qgis.Warning)
+                        raise ImportError('MetaddigoExportMetadataAlgorithm not found in module')
+                else:
+                    raise ImportError(f'Metaddigo file not found: {metapath}')
+        except Exception as e:
+            QgsMessageLog.logMessage(f"Metaddigo algorithm not loaded: {e}", 'PluginsInddigoDG', Qgis.Warning)
 
  
 

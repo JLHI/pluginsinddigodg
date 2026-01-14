@@ -18,8 +18,8 @@ from .isochrone_ign.isochrone_ign import IsochroneIgnAlgorithm
 from .flux_insee.flux_insee import FluxInseeAlgorithm
 from .teom.teom import CalculTEOMAlgorithm
 from .metaddigo.metaddigo import MetaddigoExportMetadataAlgorithm
-
-
+from .Valhalla.iti.itineraire_valhalla import ItineraireValhallaAlgorithm
+from .Valhalla.iso.iso_valhalla import IsochroneValhallaAlgorithm
 class PluginsInddigoDGProvider(QgsProcessingProvider):
 
     # --------------------------
@@ -44,7 +44,8 @@ class PluginsInddigoDGProvider(QgsProcessingProvider):
         self.addAlgorithm(CalculTEOMAlgorithm())
         self.addAlgorithm(FluxInseeAlgorithm())
         self.addAlgorithm(MetaddigoExportMetadataAlgorithm())
-
+        self.addAlgorithm(ItineraireValhallaAlgorithm())
+        self.addAlgorithm(IsochroneValhallaAlgorithm())
 
     # --------------------------
     #  INFORMATIONS DU PROVIDER

@@ -19,7 +19,7 @@ from .flux_insee.flux_insee import FluxInseeAlgorithm
 from .teom.teom import CalculTEOMAlgorithm
 from .metaddigo.metaddigo import MetaddigoExportMetadataAlgorithm
 
-
+from .sinp.sinp import MappingNaturalistDataToSinpAlgorithm
 class PluginsInddigoDGProvider(QgsProcessingProvider):
 
     # --------------------------
@@ -45,6 +45,7 @@ class PluginsInddigoDGProvider(QgsProcessingProvider):
         self.addAlgorithm(FluxInseeAlgorithm())
         self.addAlgorithm(MetaddigoExportMetadataAlgorithm())
 
+        self.addAlgorithm(MappingNaturalistDataToSinpAlgorithm())
 
     # --------------------------
     #  INFORMATIONS DU PROVIDER

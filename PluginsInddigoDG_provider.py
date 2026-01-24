@@ -20,6 +20,7 @@ from .teom.teom import CalculTEOMAlgorithm
 from .metaddigo.metaddigo import MetaddigoExportMetadataAlgorithm
 
 from .sinp.sinp import MappingNaturalistDataToSinpAlgorithm
+from .formulaire_odk.formulaire_odk import OdkFormToQgis
 class PluginsInddigoDGProvider(QgsProcessingProvider):
 
     # --------------------------
@@ -44,8 +45,8 @@ class PluginsInddigoDGProvider(QgsProcessingProvider):
         self.addAlgorithm(CalculTEOMAlgorithm())
         self.addAlgorithm(FluxInseeAlgorithm())
         self.addAlgorithm(MetaddigoExportMetadataAlgorithm())
-
         self.addAlgorithm(MappingNaturalistDataToSinpAlgorithm())
+        self.addAlgorithm(OdkFormToQgis())
 
     # --------------------------
     #  INFORMATIONS DU PROVIDER

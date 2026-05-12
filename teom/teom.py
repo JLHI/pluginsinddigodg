@@ -134,9 +134,8 @@ class CalculTEOMAlgorithm(QgsProcessingAlgorithm):
             sql_folder = os.path.join(basepath, "queries")
 
             prep_sql = load_sql_file(os.path.join(sql_folder, "teom_preparation.sql"))
-            type_sql = load_sql_file(os.path.join(sql_folder, "teom_type_locaux.sql"))
 
-            all_sql = prep_sql + type_sql
+            all_sql = prep_sql 
 
             # -------------------------
             # Exécution SQL

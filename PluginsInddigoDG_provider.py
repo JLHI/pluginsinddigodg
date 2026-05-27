@@ -21,6 +21,9 @@ from .metaddigo.metaddigo import MetaddigoExportMetadataAlgorithm
 
 from .sinp.sinp import MappingNaturalistDataToSinpAlgorithm
 from .formulaire_odk.formulaire_odk import OdkFormToQgis
+from .lidar.lidar import GenerateTransectsAlgorithm
+from .lidar.lidar_points import LidarTransectPointsAlgorithm
+from .Epes_Data_Extractor.epes_data_extractor import AutoDataPrepAlgorithm
 class PluginsInddigoDGProvider(QgsProcessingProvider):
 
     # --------------------------
@@ -46,7 +49,33 @@ class PluginsInddigoDGProvider(QgsProcessingProvider):
         self.addAlgorithm(FluxInseeAlgorithm())
         self.addAlgorithm(MetaddigoExportMetadataAlgorithm())
         self.addAlgorithm(MappingNaturalistDataToSinpAlgorithm())
-        self.addAlgorithm(OdkFormToQgis())
+        #self.addAlgorithm(OdkFormToQgis())
+        self.addAlgorithm(GenerateTransectsAlgorithm())
+        self.addAlgorithm(LidarTransectPointsAlgorithm())
+        self.addAlgorithm(AutoDataPrepAlgorithm())
+        self._check_epes_credentials()
+
+    def _check_epes_credentials(self):
+        try:
+            from .Epes_Data_Extractor.connectors import check_required_credentials
+            missing = check_required_credentials()
+            for msg in missing:
+                QgsMessageLog.logMessage(msg, 'PluginsInddigoDG', Qgis.Warning)
+            if missing:
+                try:
+                    from qgis.utils import iface
+                    if iface:
+                        iface.messageBar().pushMessage(
+                            'PluginsInddigoDG – EPES',
+                            'Variables QGIS manquantes pour certaines sources (voir Journal des messages)',
+                            level=Qgis.Warning,
+                            duration=15
+                        )
+                except Exception:
+                    pass
+        except Exception as e:
+            QgsMessageLog.logMessage(f'Erreur vérification credentials EPES : {e}', 'PluginsInddigoDG', Qgis.Warning)
+
 
     # --------------------------
     #  INFORMATIONS DU PROVIDER

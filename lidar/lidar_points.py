@@ -2,10 +2,25 @@
 import os
 import sys
 import json
+import math
 import hashlib
 import tempfile
+import datetime
 import urllib.request
 import urllib.parse
+
+_GPS_EPOCH = datetime.datetime(1980, 1, 6, tzinfo=datetime.timezone.utc)
+_GPS_LEAP_SECONDS = 18  # valeur stable depuis 2017
+
+
+def _gps_time_to_utc(adjusted_gps_time):
+    """Convertit le GPS time ajusté LAS (GPS sec − 1e9) en chaîne UTC lisible."""
+    try:
+        gps_sec = float(adjusted_gps_time) + 1_000_000_000.0
+        dt = _GPS_EPOCH + datetime.timedelta(seconds=gps_sec - _GPS_LEAP_SECONDS)
+        return dt.strftime('%Y-%m-%d %H:%M:%S')
+    except Exception:
+        return ''
 
 # Lib path + DLL copclib
 _plugin_dir = os.path.dirname(os.path.dirname(__file__))
@@ -232,6 +247,7 @@ class LidarTransectPointsAlgorithm(QgsProcessingAlgorithm):
 
         fields = QgsFields()
         fields.append(QgsField('id_transect', QVariant.Int))
+        fields.append(QgsField('d_along',     QVariant.Double))  # distance projetée depuis P1 du transect (m)
         fields.append(QgsField('x', QVariant.Double))
         fields.append(QgsField('y', QVariant.Double))
         fields.append(QgsField('z', QVariant.Double))
@@ -241,6 +257,7 @@ class LidarTransectPointsAlgorithm(QgsProcessingAlgorithm):
         fields.append(QgsField('num_returns', QVariant.Int))
         fields.append(QgsField('scan_angle', QVariant.Int))
         fields.append(QgsField('gps_time', QVariant.Double))
+        fields.append(QgsField('gps_date', QVariant.String))
         fields.append(QgsField('red', QVariant.Int))
         fields.append(QgsField('green', QVariant.Int))
         fields.append(QgsField('blue', QVariant.Int))
@@ -273,6 +290,14 @@ class LidarTransectPointsAlgorithm(QgsProcessingAlgorithm):
 
             x1, y1 = line[0].x(), line[0].y()
             x2, y2 = line[-1].x(), line[-1].y()
+
+            # Vecteur directeur unitaire du transect (P1 → P2)
+            _dx = x2 - x1
+            _dy = y2 - y1
+            _len = math.sqrt(_dx * _dx + _dy * _dy)
+            ux_t = _dx / _len if _len > 0 else 0.0
+            uy_t = _dy / _len if _len > 0 else 0.0
+
             xmin = min(x1, x2) - buf
             ymin = min(y1, y2) - buf
             xmax = max(x1, x2) + buf
@@ -360,8 +385,12 @@ class LidarTransectPointsAlgorithm(QgsProcessingAlgorithm):
                         else:
                             rv = gv = bv = 0
                         nv = int(nirs[idx]) if has_nir else 0
+                        # Projection du point sur l'axe du transect (équivalent de
+                        # line_locate_point dans QGIS) : distance depuis P1 en mètres.
+                        d_along = round((fx - x1) * ux_t + (fy - y1) * uy_t, 3)
                         f.setAttributes([
                             feat.id(),
+                            d_along,
                             round(fx, 3),
                             round(fy, 3),
                             round(fz, 3),
@@ -371,6 +400,7 @@ class LidarTransectPointsAlgorithm(QgsProcessingAlgorithm):
                             int(nrets[idx]),
                             int(angles[idx]),
                             float(times[idx]),
+                            _gps_time_to_utc(times[idx]),
                             rv,
                             gv,
                             bv,

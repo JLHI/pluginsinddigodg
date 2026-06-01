@@ -50,45 +50,43 @@ DEFAULT_CONFIG = {
         },
         "Paysage": {
             "sources": [
-                {
+        
+                   {
                     "id": "bdtopo_bati",
                     "name": "Bâti",
-                    "type": "postgis",
+                    "type": "wfs",
                     "nomenclature": "bdtopo_bati",
                     "conn": {
-                        "service": "referentiels",
-                        "schema": "ign",
-                        "table": "bati",
-                        "geom_column": "geom",
-                        "srid": 2154
+                        "base_url": "https://data.geopf.fr/wfs/ows",
+                        "typename": "BDTOPO_V3:batiment",
+                        "geom_field": "geometrie",
+                        "version": "auto"
                     },
                     "target": {"folder": "4-DATA VECTEUR/Milieu_humain"}
                 },
                 {
                     "id": "bdtopo_route",
                     "name": "Routes",
-                    "type": "postgis",
+                    "type": "wfs",
                     "nomenclature": "bdtopo_route",
                     "conn": {
-                        "service": "referentiels",
-                        "schema": "ign",
-                        "table": "route",
-                        "geom_column": "geom",
-                        "srid": 2154
+                        "base_url": "https://data.geopf.fr/wfs/ows",
+                        "typename": "BDTOPO_V3:troncon_de_route",
+                        "geom_field": "geometrie",
+                        "version": "auto"
                     },
                     "target": {"folder": "4-DATA VECTEUR/Milieu_humain"}
                 },
                 {
                     "id": "bdtopo_vegetation",
                     "name": "Végétation",
-                    "type": "postgis",
+                    "type": "wfs",
                     "nomenclature": "bdtopo_vegetation",
                     "conn": {
-                        "service": "referentiels",
-                        "schema": "ign",
-                        "table": "vegetation",
-                        "geom_column": "geom",
-                        "srid": 2154
+                        "base_url": "https://data.geopf.fr/wfs/ows",
+                        "typename": "BDTOPO_V3:zone_de_vegetation",
+                        "geom_field": "geometrie",
+                        "version": "auto"
                     },
                     "target": {"folder": "4-DATA VECTEUR/Milieu_humain"}
                 },
@@ -100,7 +98,7 @@ DEFAULT_CONFIG = {
                     "conn": {
                         "service": "referentiels",
                         "schema": "sncf",
-                        "table": "reseau_ferre",
+                        "table": "lignes_du_rfn",
                         "geom_column": "geom",
                         "srid": 2154
                     },
@@ -108,9 +106,14 @@ DEFAULT_CONFIG = {
                 },
                 {
                     "id": "ign_rgealt_5m",
-                    "name": "Altimétrie (raster – non géré automatiquement)",
-                    "type": "raster",
-                    "nomenclature": "ign_rgealt_5m",
+                    "name": "Altimétrie MNT 5m (RGE Alti)",
+                    "type": "raster_ign",
+                    "nomenclature": "ign_rgealti_5m",
+                    "conn": {
+                        "wms_url": "https://data.geopf.fr/wms-r",
+                        "layer": "ELEVATION.ELEVATIONGRIDCOVERAGE.HIGHRES",
+                        "resolution": 5
+                    },
                     "target": {"folder": "3-DATA RASTER"}
                 },
                 {
@@ -120,8 +123,8 @@ DEFAULT_CONFIG = {
                     "nomenclature": "bdtopage_troncon",
                     "conn": {
                         "service": "referentiels",
-                        "schema": "ign",
-                        "table": "troncon_cours_eau",
+                        "schema": "sandre",
+                        "table": "bd_topage_troncon_hydrographique",
                         "geom_column": "geom",
                         "srid": 2154
                     },
@@ -133,63 +136,71 @@ DEFAULT_CONFIG = {
                     "type": "wfs",
                     "nomenclature": "adp_bien_unesco",
                     "conn": {
-                        "base_url": "https://atlas.patrimoines.culture.fr/geoserver/wfs",
-                        "typename": "atlas_patrimoines:UNESCO_PATRIMOINE_MONDIAL"
-                    },
-                    "target": {"folder": "4-DATA VECTEUR/Patrimoine"}
-                },
-                {
-                    "id": "adp_spr",
-                    "name": "Site Patrimonial Remarquable (SPR)",
-                    "type": "wfs",
-                    "nomenclature": "adp_spr",
-                    "conn": {
-                        "base_url": "https://atlas.patrimoines.culture.fr/geoserver/wfs",
-                        "typename": "atlas_patrimoines:SITE_PATRIMONIAL_REMARQUABLE"
+                        "base_url": "http://atlas.patrimoines.culture.fr/cgi-bin/mapserv?MAP=/home/atlas-mapserver/production/var/data/MD_2556/MD_2556.map",
+                        "typename": "MD_2556",
+                        "version": "1.1.0",
+                        "skip_native": True
                     },
                     "target": {"folder": "4-DATA VECTEUR/Patrimoine"}
                 },
                 {
                     "id": "adp_site_classe_inscrit",
                     "name": "Site classé et inscrit",
-                    "type": "wfs",
+                    "type": "api_adp_dynamic",
                     "nomenclature": "adp_site_classe_inscrit",
                     "conn": {
-                        "base_url": "https://atlas.patrimoines.culture.fr/geoserver/wfs",
-                        "typename": "atlas_patrimoines:SITES_CLASSES_ET_INSCRITS"
+                        "category_filter": ["Site classé ou inscrit"]
                     },
                     "target": {"folder": "4-DATA VECTEUR/Patrimoine"}
                 },
                 {
                     "id": "adp_mh",
-                    "name": "Monument historique (MH)",
-                    "type": "wfs",
+                    "name": "Monument historique (MH) – Emprise",
+                    "type": "api_adp_dynamic",
                     "nomenclature": "adp_mh",
                     "conn": {
-                        "base_url": "https://atlas.patrimoines.culture.fr/geoserver/wfs",
-                        "typename": "atlas_patrimoines:MONUMENTS_HISTORIQUES"
+                        "category_filter": [
+                            "Monument historique",
+                            "Immeuble classé ou inscrit"
+                        ]
                     },
                     "target": {"folder": "4-DATA VECTEUR/Patrimoine"}
                 },
                 {
                     "id": "adp_perimetre_mh",
-                    "name": "Périmètre de protection autour du MH",
-                    "type": "wfs",
+                    "name": "Périmètre de protection autour des MH",
+                    "type": "api_adp_dynamic",
                     "nomenclature": "adp_perimetre_mh",
                     "conn": {
-                        "base_url": "https://atlas.patrimoines.culture.fr/geoserver/wfs",
-                        "typename": "atlas_patrimoines:PERIMETRE_PROTECTION_MH"
+                        "category_filter": ["Périmètre de protection d'un monument historique"]
+                    },
+                    "target": {"folder": "4-DATA VECTEUR/Patrimoine"}
+                },
+                {
+                    "id": "adp_spr",
+                    "name": "Site Patrimonial Remarquable (SPR)",
+                    "type": "api_adp_dynamic",
+                    "nomenclature": "adp_spr",
+                    "conn": {
+                        "category_filter": [
+                            "Site Patrimonial Remarquable",
+                            "Sites patrimoniaux remarquables",
+                            "Aire de mise en valeur de l'architecture et du patrimoine",
+                            "Aires de Mise en Valeur de l'Architecture et du Patrimoine",
+                            "Zone de Protection du Patrimoine Architectural, Urbain et Paysager"
+                        ]
                     },
                     "target": {"folder": "4-DATA VECTEUR/Patrimoine"}
                 },
                 {
                     "id": "adp_zppa",
-                    "name": "Patrimoine archéologique (ZPPA)",
-                    "type": "wfs",
+                    "name": "Zone de présomption de prescription archéologique (ZPPA)",
+                    "type": "api_adp_dynamic",
                     "nomenclature": "adp_zppa",
                     "conn": {
-                        "base_url": "https://atlas.patrimoines.culture.fr/geoserver/wfs",
-                        "typename": "atlas_patrimoines:ZONE_PROTECTION_PATRIMOINE_ARCHEO"
+                        "category_filter": [
+                            "Zone de présomption de prescription archéologique"
+                        ]
                     },
                     "target": {"folder": "4-DATA VECTEUR/Patrimoine"}
                 },
@@ -201,47 +212,55 @@ DEFAULT_CONFIG = {
                     "conn": {
                         "service": "referentiels",
                         "schema": "on3v",
-                        "table": "voies_vertes",
+                        "table": "schema_national_veloroute_voie_verte",
                         "geom_column": "geom",
                         "srid": 2154
                     },
                     "target": {"folder": "4-DATA VECTEUR/Milieu_humain"}
                 },
-                {
-                    "id": "grande_randonnee",
-                    "name": "Sentiers de randonnées",
-                    "type": "postgis",
-                    "nomenclature": "grande_randonnee",
-                    "conn": {
-                        "service": "referentiels",
-                        "schema": "ign",
-                        "table": "itineraire_randonnee",
-                        "geom_column": "geom",
-                        "srid": 2154
-                    },
-                    "target": {"folder": "4-DATA VECTEUR/Milieu_humain"}
-                },
+                # {
+                #     "id": "itineraires_randonnees",
+                #     "name": "Tourisme - Randonnée pédestre",
+                #     "type": "itineraires_merged",
+                #     "nomenclature": "itineraires_randonnees",
+                #     "conn": {
+                #         "postgis": {
+                #             "service": "referentiels",
+                #             "schema": "ign",
+                #             "table": "itineraire_randonnee",
+                #             "geom_column": "geom",
+                #             "srid": 2154
+                #         },
+                #         "wfs_typename": "BDTOPO_V3:itineraire_autre",
+                #         "wfs_base_url": "https://data.geopf.fr/wfs/ows?VERSION=2.0.0",
+                #         "overpass_query": "relation[\"route\"~\"hiking|foot\"]"
+                #     },
+                #     "target": {"folder": "4-DATA VECTEUR/Milieu_humain"}
+                # },
                 {
                     "id": "dt_tourisme",
-                    "name": "Tourisme",
-                    "type": "api_geojson",
+                    "name": "Tourisme - Points d'intérêt",
+                    "type": "api_datatourisme",
                     "nomenclature": "dt_tourisme",
                     "conn": {
-                        "url": "https://diffusionv2.datatourisme.fr/onTour/touristic-objects?lat={lat}&lon={lon}&dist={dist_km}&format=geojson"
+                        "base_url": "https://api.datatourisme.fr/v1/catalog",
+                        "api_key_var": "data_tourisme",
+                        "layer_geometry": "point"
                     },
                     "target": {"folder": "4-DATA VECTEUR/Milieu_humain"}
-                },
-                {
-                    "id": "unites_paysageres",
-                    "name": "Unités paysagères",
-                    "type": "wfs",
-                    "nomenclature": "unites_paysageres",
-                    "conn": {
-                        "base_url": "https://wxs.ign.fr/paysage/geoportail/wfs",
-                        "typename": "UNITE_PAYSAGERE"
-                    },
-                    "target": {"folder": "4-DATA VECTEUR/Paysage"}
                 }
+                # ,
+                # {
+                #     "id": "unites_paysageres",
+                #     "name": "Unités paysagères",
+                #     "type": "wfs",
+                #     "nomenclature": "unites_paysageres",
+                #     "conn": {
+                #         "base_url": "https://wxs.ign.fr/paysage/geoportail/wfs",
+                #         "typename": "UNITE_PAYSAGERE"
+                #     },
+                #     "target": {"folder": "4-DATA VECTEUR/Paysage"}
+                # }
             ]
         },
         "EIE": {
@@ -385,16 +404,27 @@ DEFAULT_CONFIG = {
                     "target": {"folder": "4-DATA VECTEUR/Milieu_humain"}
                 },
                 {
-                    "id": "ign_servitude_aero",
-                    "name": "Servitudes aéronautiques",
+                    "id": "brgm_masse_deau_souterraine",
+                    "name": "Masses d'eau souterraines",
                     "type": "wfs",
-                    "nomenclature": "ign_servitude_aero",
+                    "nomenclature": "brgm_masse_deau_souterraine",
                     "conn": {
-                        "base_url": "https://ogc.geo-ide.developpement-durable.gouv.fr/wfs",
-                        "typename": "ms:SDA_CAT"
+                        "base_url": "https://services.sandre.eaufrance.fr/geo/MasseDEau_VRAP2022?VERSION=2.0.0",
+                        "typename": "sa:MasseDEauSouterraine_VRAP2022"
                     },
-                    "target": {"folder": "4-DATA VECTEUR/Milieu_humain"}
+                    "target": {"folder": "4-DATA VECTEUR/Milieu_physique"}
                 },
+                # {
+                #     "id": "ign_servitude_aero",
+                #     "name": "Servitudes aéronautiques",
+                #     "type": "wfs",
+                #     "nomenclature": "ign_servitude_aero",
+                #     "conn": {
+                #         "base_url": "https://ogc.geo-ide.developpement-durable.gouv.fr/wfs",
+                #         "typename": "ms:SDA_CAT"
+                #     },
+                #     "target": {"folder": "4-DATA VECTEUR/Milieu_humain"}
+                # },
                 {
                     "id": "georisques_casias",
                     "name": "Site industriel (CASIAS / ICP)",
@@ -455,7 +485,7 @@ DEFAULT_CONFIG = {
                     "id": "enedis_reseau",
                     "name": "Enedis - Ligne aérienne HTA",
                     "type": "postgis",
-                    "nomenclature": "ligne_aerienne_hta",
+                    "nomenclature": "enedis_ligne_aerienne_hta",
                     "conn": {
                         "service": "referentiels",
                         "schema": "enedis",
@@ -469,7 +499,7 @@ DEFAULT_CONFIG = {
                     "id": "enedis_reseau",
                     "name": "Enedis - Ligne souterraine BTA",
                     "type": "postgis",
-                    "nomenclature": "ligne_souterraine_bta",
+                    "nomenclature": "enedis_ligne_souterraine_bta",
                     "conn": {
                         "service": "referentiels",
                         "schema": "enedis",
@@ -483,7 +513,7 @@ DEFAULT_CONFIG = {
                     "id": "enedis_reseau",
                     "name": "Enedis - Ligne souterraine HTA",
                     "type": "postgis",
-                    "nomenclature": "ligne_souterraine_hta",
+                    "nomenclature": "enedis_ligne_souterraine_hta",
                     "conn": {
                         "service": "referentiels",
                         "schema": "enedis",

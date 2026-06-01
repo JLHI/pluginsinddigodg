@@ -6,14 +6,39 @@ import http.cookiejar
 from html.parser import HTMLParser
 
 
-def http_get_sync(url, timeout_ms=30000, feedback=None):
+def http_get_sync(url, timeout_ms=30000, feedback=None, headers=None):
     timeout_s = timeout_ms / 1000
     req = urllib.request.Request(url)
     req.add_header('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) QGIS/3.x')
     req.add_header('Accept', 'application/json, application/geo+json, application/xml, */*')
+    for k, v in (headers or {}).items():
+        req.add_header(k, v)
     try:
         with urllib.request.urlopen(req, timeout=timeout_s) as resp:
             return resp.read().decode('utf-8', errors='replace')
+    except urllib.error.HTTPError as e:
+        msg = f"Erreur HTTP {e.code} pour {url}"
+        if feedback:
+            feedback.pushWarning(msg)
+        raise IOError(msg)
+    except Exception as e:
+        msg = f"Erreur réseau pour {url} : {e}"
+        if feedback:
+            feedback.pushWarning(msg)
+        raise IOError(msg)
+
+
+def http_get_bytes(url, timeout_ms=30000, feedback=None, headers=None):
+    """Retourne les bytes bruts sans décodage — préserver l'encodage d'origine (ex. ISO-8859-1 pour GML MapServer)."""
+    timeout_s = timeout_ms / 1000
+    req = urllib.request.Request(url)
+    req.add_header('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) QGIS/3.x')
+    req.add_header('Accept', 'application/json, application/geo+json, application/xml, */*')
+    for k, v in (headers or {}).items():
+        req.add_header(k, v)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+            return resp.read()
     except urllib.error.HTTPError as e:
         msg = f"Erreur HTTP {e.code} pour {url}"
         if feedback:

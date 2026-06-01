@@ -5,6 +5,10 @@ __copyright__ = '(C) 2022 by JL HUMBERT'
 
 import os
 import traceback
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+import shutil
 
 from qgis.core import (
     QgsProcessingAlgorithm,
@@ -19,10 +23,70 @@ from qgis.core import (
     QgsGeometry,
     QgsCoordinateTransform,
     QgsCoordinateReferenceSystem,
+    QgsRasterLayer,
 )
 
 from .sources import DEFAULT_CONFIG
-from .connectors import fetch_source, save_layer_as_gpkg
+from .connectors import fetch_source, save_layer_as_gpkg, reproject_layer
+
+
+# ---------- Feedback thread-safe ----------
+
+_LOG_SKIP = (
+    'URL : ', 'CRS couche', 'CRS WFS', 'Service URL →',
+    'Retry ', 'DATAtourisme page', 'Page ', 'Overpass query :',
+    'IGN champs disponibles', 'Clés ',
+)
+
+class _ThreadFeedback:
+    """Bufferise les logs d'un thread ; flush atomique en fin de tâche."""
+    def __init__(self, base_feedback, name=''):
+        self._base = base_feedback
+        self.name = name
+        self._buf = []   # liste de ('info'|'warn'|'error', msg)
+
+    def pushInfo(self, msg):
+        self._buf.append(('info', msg.strip()))
+
+    def pushWarning(self, msg):
+        self._buf.append(('warn', msg.strip()))
+
+    def reportError(self, msg, fatalError=False):
+        self._buf.append(('error', msg.strip()))
+
+    def isCanceled(self):
+        return self._base.isCanceled()
+
+    def flush(self, lock, save_path=None, err=None, verbose=True):
+        """Vide le buffer vers feedback de façon atomique.
+
+        verbose=True  → logs détaillés (comportement actuel)
+        verbose=False → une seule ligne : ✓ nom ou ✗ nom
+        """
+        with lock:
+            if verbose:
+                self._base.pushInfo(f'\n┌── {self.name}')
+                for level, msg in self._buf:
+                    if any(msg.startswith(p) for p in _LOG_SKIP):
+                        continue
+                    if level == 'info':
+                        self._base.pushInfo(f'│  {msg}')
+                    elif level == 'warn':
+                        self._base.pushWarning(f'│  ⚠ {msg}')
+                    else:
+                        self._base.reportError(f'│  ✗ {msg}')
+                if err:
+                    self._base.reportError(f'└─ ✗ {err}', fatalError=False)
+                elif save_path:
+                    self._base.pushInfo(f'└─ ✓ {os.path.basename(save_path)}')
+                else:
+                    self._base.pushInfo('└─ (ignoré)')
+            else:
+                if err:
+                    self._base.reportError(f'✗  {self.name} — {err}', fatalError=False)
+                elif save_path:
+                    self._base.pushInfo(f'✓  {self.name}')
+                # ignoré → silencieux en mode simple
 
 
 # ---------- Géométrie ----------
@@ -59,6 +123,7 @@ class AutoDataPrepAlgorithm(QgsProcessingAlgorithm):
     GROUP_EIE = 'GROUP_EIE'
     LAYERS_EIE = 'LAYERS_EIE'
     OUTPUT_FOLDER = 'OUTPUT_FOLDER'
+    VERBOSE_LOGS = 'VERBOSE_LOGS'
 
     def initAlgorithm(self, config=None):  # noqa: ARG002
         self.addParameter(
@@ -71,10 +136,10 @@ class AutoDataPrepAlgorithm(QgsProcessingAlgorithm):
         self.addParameter(
             QgsProcessingParameterNumber(
                 self.BUFFER_DISTANCE,
-                'Distance de buffer (m)',
+                'Distance de buffer (km)',
                 type=QgsProcessingParameterNumber.Double,
-                defaultValue=25000.0,
-                minValue=0.0
+                defaultValue=10.0,
+                minValue=0.5
             )
         )
 
@@ -87,7 +152,7 @@ class AutoDataPrepAlgorithm(QgsProcessingAlgorithm):
         ))
 
         # --- Paysage ---
-        self.addParameter(QgsProcessingParameterBoolean(self.GROUP_PAYSAGE, 'Groupe : Paysage', defaultValue=False))
+        self.addParameter(QgsProcessingParameterBoolean(self.GROUP_PAYSAGE, 'Groupe : Paysage', defaultValue=True))
         paysage = [s['name'] for s in DEFAULT_CONFIG['groups']['Paysage']['sources']]
         self.addParameter(QgsProcessingParameterEnum(
             self.LAYERS_PAYSAGE, '  Couches Paysage à extraire',
@@ -111,12 +176,18 @@ class AutoDataPrepAlgorithm(QgsProcessingAlgorithm):
             defaultValue=default_folder
         ))
 
+        # --- Logs ---
+        self.addParameter(QgsProcessingParameterBoolean(
+            self.VERBOSE_LOGS, 'Logs détaillés', defaultValue=False
+        ))
+
     # ------------------------------------------------------------------
 
     def processAlgorithm(self, parameters, context, feedback):
         input_layer = self.parameterAsVectorLayer(parameters, self.INPUT_POLYGON, context)
-        buffer_dist = self.parameterAsDouble(parameters, self.BUFFER_DISTANCE, context)
+        buffer_dist = self.parameterAsDouble(parameters, self.BUFFER_DISTANCE, context)*1000.0
         output_folder = self.parameterAsFile(parameters, self.OUTPUT_FOLDER, context)
+        verbose_logs = self.parameterAsBool(parameters, self.VERBOSE_LOGS, context)
 
         feats = list(input_layer.getFeatures())
         if not feats:
@@ -136,51 +207,73 @@ class AutoDataPrepAlgorithm(QgsProcessingAlgorithm):
             (self.GROUP_EIE,     self.LAYERS_EIE,     'EIE'),
         ]
 
-        temp_files = []
-        try:
-            for group_param, layers_param, group_key in groups_config:
-                if feedback.isCanceled():
-                    break
-                if not self.parameterAsBool(parameters, group_param, context):
-                    feedback.pushInfo(f'Groupe {group_key} : ignoré (décoché)')
-                    continue
+        # Collecter toutes les sources à traiter (tous groupes confondus)
+        tasks = []
+        for group_param, layers_param, group_key in groups_config:
+            if not self.parameterAsBool(parameters, group_param, context):
+                feedback.pushInfo(f'Groupe {group_key} : ignoré (décoché)')
+                continue
+            selected = self.parameterAsEnums(parameters, layers_param, context)
+            if not selected:
+                feedback.pushInfo(f'Groupe {group_key} : aucune couche sélectionnée')
+                continue
+            sources = DEFAULT_CONFIG['groups'][group_key]['sources']
+            feedback.pushInfo(f'Groupe {group_key} : {len(selected)} couche(s) planifiée(s)')
+            for idx in selected:
+                if idx < len(sources):
+                    tasks.append((group_key, sources[idx]))
 
-                selected = self.parameterAsEnums(parameters, layers_param, context)
-                if not selected:
-                    feedback.pushInfo(f'Groupe {group_key} : aucune couche sélectionnée')
-                    continue
+        if not tasks:
+            return {}
 
-                sources = DEFAULT_CONFIG['groups'][group_key]['sources']
-                feedback.pushInfo(f'\n=== Groupe {group_key} – {len(selected)} couche(s) ===')
+        feedback.pushInfo(f'\n=== Lancement parallèle : {len(tasks)} source(s) ===')
+        log_lock = threading.Lock()
 
-                for idx in selected:
-                    if feedback.isCanceled():
-                        break
-                    if idx >= len(sources):
-                        continue
-                    src = sources[idx]
-                    name = src.get('name', src['id'])
-                    feedback.pushInfo(f'\n  ====== {name}======')
+        def _run(group_key, src):
+            name = src.get('name', src['id'])
+            fb = _ThreadFeedback(feedback, name)
+            thread_temp = []
+            try:
+                if fb.isCanceled():
+                    return fb, None, None
+                layer = fetch_source(src, buffer_bbox, dist_km, centroid_pt, fb, thread_temp)
+                if layer is None or fb.isCanceled():
+                    return fb, None, None
+                nomenclature = src.get('nomenclature', src['id'])
+                target_folder = src.get('target', {}).get('folder', '')
+                if isinstance(layer, QgsRasterLayer):
+                    save_path = os.path.join(output_folder, target_folder, f'{nomenclature}.tif')
+                    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+                    shutil.copy2(layer.dataProvider().dataSourceUri(), save_path)
+                    if fb:
+                        fb.pushInfo(f'    Raster sauvegardé : {os.path.basename(save_path)}')
+                else:
+                    layer = reproject_layer(layer)
+                    save_path = os.path.join(output_folder, target_folder, f'{nomenclature}.gpkg')
+                    save_layer_as_gpkg(layer, save_path, nomenclature, fb)
+                return fb, save_path, None
+            except Exception as e:
+                return fb, None, str(e)
+            finally:
+                for f in thread_temp:
                     try:
-                        layer = fetch_source(
-                            src, buffer_bbox, dist_km, centroid_pt, feedback, temp_files
-                        )
-                        if layer is None:
-                            continue
-                        target_folder = src.get('target', {}).get('folder', '')
-                        nomenclature = src.get('nomenclature', src['id'])
-                        save_path = os.path.join(output_folder, target_folder, f'{nomenclature}.gpkg')
-                        save_layer_as_gpkg(layer, save_path, nomenclature, feedback)
-                        feedback.pushInfo(f'    ✓ {os.path.normpath(save_path)}')
-                    except Exception as e:
-                        feedback.reportError(f'    ✗ Erreur : {e}', fatalError=False)
-                        feedback.reportError(traceback.format_exc(), fatalError=False)
+                        os.unlink(f)
+                    except Exception:
+                        pass
+
+        executor = ThreadPoolExecutor(max_workers=8)
+        futures = {executor.submit(_run, g, s): (g, s) for g, s in tasks}
+        try:
+            for future in as_completed(futures):
+                fb, save_path, err = future.result()
+                fb.flush(log_lock, save_path=save_path, err=err, verbose=verbose_logs)
+                if feedback.isCanceled():
+                    feedback.pushInfo('\nAnnulation : arrêt des tâches en attente…')
+                    for f in futures:
+                        f.cancel()
+                    break
         finally:
-            for f in temp_files:
-                try:
-                    os.unlink(f)
-                except Exception:
-                    pass
+            executor.shutdown(wait=False)
 
         return {}
 
@@ -210,7 +303,12 @@ class AutoDataPrepAlgorithm(QgsProcessingAlgorithm):
             '• atlasante_user / atlasante_password\n'
             '  → Accès Atlasanté (captages eau potable)\n'
             '  → Compte à demander sur https://www.atlasante.fr\n\n'
-            'Sans ces variables, la source concernée échouera avec un message explicite.'
+            '• data_tourisme\n'
+            '  → Clé API DATAtourisme (POI touristiques et itinéraires)\n'
+            '  → Clé à obtenir sur https://info.datatourisme.fr/utiliser-les-donnees\n\n'
+            'Sans ces variables, la source concernée échouera avec un message explicite.\n'
+            'Un avertissement s\'affiche également dans la barre de messages au démarrage '
+            'du plugin si une variable est manquante.'
         )
 
     def createInstance(self):

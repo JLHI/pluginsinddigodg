@@ -23,6 +23,9 @@ from .sinp.sinp import MappingNaturalistDataToSinpAlgorithm
 from .formulaire_odk.formulaire_odk import OdkFormToQgis
 from .lidar.lidar import GenerateTransectsAlgorithm
 from .lidar.lidar_points import LidarTransectPointsAlgorithm
+from .lidar.lidar_road_profile import LidarRoadProfileAlgorithm
+from .lidar.lidar_clip_parcels import ClipTransectsByParcelsAlgorithm
+from .lidar.lidar_classify_transects import LidarClassifyTransectsAlgorithm
 from .Epes_Data_Extractor.epes_data_extractor import AutoDataPrepAlgorithm
 class PluginsInddigoDGProvider(QgsProcessingProvider):
 
@@ -52,6 +55,9 @@ class PluginsInddigoDGProvider(QgsProcessingProvider):
         #self.addAlgorithm(OdkFormToQgis())
         self.addAlgorithm(GenerateTransectsAlgorithm())
         self.addAlgorithm(LidarTransectPointsAlgorithm())
+        self.addAlgorithm(LidarRoadProfileAlgorithm())
+        self.addAlgorithm(ClipTransectsByParcelsAlgorithm())
+        self.addAlgorithm(LidarClassifyTransectsAlgorithm())
         self.addAlgorithm(AutoDataPrepAlgorithm())
         self._check_epes_credentials()
 

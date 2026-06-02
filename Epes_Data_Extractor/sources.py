@@ -216,7 +216,7 @@ DEFAULT_CONFIG = {
                         "geom_column": "geom",
                         "srid": 2154
                     },
-                    "target": {"folder": "4-DATA VECTEUR/Milieu_humain"}
+                    "target": {"folder": "4-DATA VECTEUR/Tourisme"}
                 },
                 # {
                 #     "id": "itineraires_randonnees",
@@ -235,7 +235,7 @@ DEFAULT_CONFIG = {
                 #         "wfs_base_url": "https://data.geopf.fr/wfs/ows?VERSION=2.0.0",
                 #         "overpass_query": "relation[\"route\"~\"hiking|foot\"]"
                 #     },
-                #     "target": {"folder": "4-DATA VECTEUR/Milieu_humain"}
+                #     "target": {"folder": "4-DATA VECTEUR/Tourisme"}
                 # },
                 {
                     "id": "dt_tourisme",
@@ -247,7 +247,7 @@ DEFAULT_CONFIG = {
                         "api_key_var": "data_tourisme",
                         "layer_geometry": "point"
                     },
-                    "target": {"folder": "4-DATA VECTEUR/Milieu_humain"}
+                    "target": {"folder": "4-DATA VECTEUR/Tourisme"}
                 }
                 # ,
                 # {

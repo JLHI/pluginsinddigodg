@@ -24,7 +24,16 @@ from .formulaire_odk.formulaire_odk import OdkFormToQgis
 from .lidar.lidar import GenerateTransectsAlgorithm
 from .lidar.lidar_points import LidarTransectPointsAlgorithm
 from .lidar.lidar_clip_parcels import ClipTransectsByParcelsAlgorithm
-from .lidar.lidar_urban_profile import LidarUrbanRoadProfileAlgorithm
+try:
+    from .lidar.lidar_urban_profile import LidarRoadProfileAlgorithm
+    _HAS_URBAN_PROFILE = True
+except ImportError:
+    _HAS_URBAN_PROFILE = False
+    QgsMessageLog.logMessage(
+        'numpy manquant — LidarRoadProfileAlgorithm désactivé. '
+        'Installez numpy dans votre environnement QGIS pour activer cet outil.',
+        'PluginsInddigoDG', Qgis.Warning
+    )
 from .Epes_Data_Extractor.epes_data_extractor import AutoDataPrepAlgorithm
 class PluginsInddigoDGProvider(QgsProcessingProvider):
 
@@ -46,7 +55,7 @@ class PluginsInddigoDGProvider(QgsProcessingProvider):
         self.addAlgorithm(ArbreDeRabattementAlgorithm())
         self.addAlgorithm(GtfsRouteIgn())
         self.addAlgorithm(ItineraireParLaRouteAlgorithm())
-        self.addAlgorithm(IsochroneIgnAlgorithm())
+        self.addAlgorithm(LidarRoadProfileAlgorithm())
         self.addAlgorithm(CalculTEOMAlgorithm())
         self.addAlgorithm(FluxInseeAlgorithm())
         self.addAlgorithm(MetaddigoExportMetadataAlgorithm())
@@ -55,7 +64,7 @@ class PluginsInddigoDGProvider(QgsProcessingProvider):
         self.addAlgorithm(GenerateTransectsAlgorithm())
         self.addAlgorithm(LidarTransectPointsAlgorithm())
         self.addAlgorithm(ClipTransectsByParcelsAlgorithm())
-        self.addAlgorithm(LidarUrbanRoadProfileAlgorithm())
+        self.addAlgorithm(LidarRoadProfileAlgorithm())
         self.addAlgorithm(AutoDataPrepAlgorithm())
         self._check_epes_credentials()
 

@@ -5,6 +5,7 @@ import os
 import re
 import json
 import tempfile
+import threading
 import urllib.parse
 
 from qgis.core import (
@@ -179,6 +180,8 @@ def fetch_from_wfs(src, bbox_2154, feedback=None, temp_files=None):
     srsname = conn.get('srsname', 'EPSG:2154')
     cql_filter = conn.get('cql_filter', '')
     skip_native = conn.get('skip_native', False)
+    skip_geojson = conn.get('skip_geojson', False)
+    bbox_param_name = conn.get('bbox_param', 'BBOX')   # MapServer WFS 1.1.0 → 'boundedBy'
     geom_field = conn.get('geom_field', '')
     ver_str = '2.0.0' if version == 'auto' else version
 
@@ -271,45 +274,44 @@ def fetch_from_wfs(src, bbox_2154, feedback=None, temp_files=None):
         if feedback:
             feedback.pushInfo('    Natif ignoré (skip_native) → HTTP GeoJSON…')
 
-    geojson_base = (
-        f"{base_url_clean}{sep}SERVICE=WFS&VERSION={ver_str}&REQUEST=GetFeature"
-        f"&TYPENAME={typename}&SRSNAME={srsname}&outputFormat=application/json"
-        + (f"&BBOX={bbox_param}" if not cql_filter else '')
-        + cql_param
-    )
-    try:
-        all_features = []
-        start = 0
-        page_size = None  # inconnu jusqu'à la 1ère réponse
-        while True:
-            url_page = geojson_base + (f"&STARTINDEX={start}" if start > 0 else '')
-            txt = http_get_sync(url_page, feedback=feedback)
-            geojson = json.loads(txt)
-            if geojson.get('type') not in ('FeatureCollection', 'Feature'):
-                break
-            page_feats = geojson.get('features', [])
-            all_features.extend(page_feats)
-            n_returned = len(page_feats)
-            if page_size is None:
-                page_size = n_returned
-            # WFS 2.0 indique si d'autres pages existent
-            n_matched = geojson.get('numberMatched', None)
-            if n_matched is not None and n_matched != 'unknown':
-                if len(all_features) >= int(n_matched):
+    if not skip_geojson:
+        geojson_base = (
+            f"{base_url_clean}{sep}SERVICE=WFS&VERSION={ver_str}&REQUEST=GetFeature"
+            f"&TYPENAME={typename}&SRSNAME={srsname}&outputFormat=application/json"
+            + (f"&{bbox_param_name}={bbox_param}" if not cql_filter else '')
+            + cql_param
+        )
+        try:
+            all_features = []
+            start = 0
+            page_size = None
+            while True:
+                url_page = geojson_base + (f"&STARTINDEX={start}" if start > 0 else '')
+                txt = http_get_sync(url_page, feedback=feedback)
+                geojson = json.loads(txt)
+                if geojson.get('type') not in ('FeatureCollection', 'Feature'):
                     break
-            # Sinon : page incomplète = dernière page
-            if n_returned < page_size or n_returned == 0:
-                break
-            start += n_returned
-        if feedback:
-            feedback.pushInfo(f'    WFS GeoJSON : {len(all_features)} entités')
-        merged = {'type': 'FeatureCollection', 'features': all_features}
-        layer = _geojson_to_layer(merged, src['name'], temp_files)
-        feats = _wfs_filter_bbox(layer, bbox_2154, feedback)
-        return _build_memory(layer, feats, src['name'])
-    except Exception as e_geojson:
-        if feedback:
-            feedback.pushInfo(f'    HTTP GeoJSON KO : {e_geojson}')
+                page_feats = geojson.get('features', [])
+                all_features.extend(page_feats)
+                n_returned = len(page_feats)
+                if page_size is None:
+                    page_size = n_returned
+                n_matched = geojson.get('numberMatched', None)
+                if n_matched is not None and n_matched != 'unknown':
+                    if len(all_features) >= int(n_matched):
+                        break
+                if n_returned < page_size or n_returned == 0:
+                    break
+                start += n_returned
+            if feedback:
+                feedback.pushInfo(f'    WFS GeoJSON : {len(all_features)} entités')
+            merged = {'type': 'FeatureCollection', 'features': all_features}
+            layer = _geojson_to_layer(merged, src['name'], temp_files)
+            feats = _wfs_filter_bbox(layer, bbox_2154, feedback)
+            return _build_memory(layer, feats, src['name'])
+        except Exception as e_geojson:
+            if feedback:
+                feedback.pushInfo(f'    HTTP GeoJSON KO : {e_geojson}')
 
     if feedback:
         feedback.pushInfo('    Essai HTTP GML brut…')
@@ -321,7 +323,7 @@ def fetch_from_wfs(src, bbox_2154, feedback=None, temp_files=None):
     gml_url = (
         f"{base_url_clean}{sep}SERVICE=WFS&VERSION={ver_str}&REQUEST=GetFeature"
         f"&TYPENAME={typename}&SRSNAME={srsname}"
-        + (f"&BBOX={bbox_param}" if not cql_filter else '')
+        + (f"&{bbox_param_name}={bbox_param}" if not cql_filter else '')
         + cql_param
     )
     # Bytes bruts : préserve l'encodage d'origine (MapServer sert souvent ISO-8859-1).
@@ -955,6 +957,82 @@ def save_layer_as_gpkg(layer, output_path, layer_name, feedback=None):
         raise IOError(f"Erreur écriture {output_path} (code {err}) {msg}")
 
 
+# ---------- ArcGIS Feature Service ----------
+
+def fetch_from_arcgis(src, bbox_2154, feedback=None, temp_files=None):
+    """Interroge un ArcGIS FeatureServer avec filtre spatial BBOX et pagination.
+
+    conn attendu :
+      url          : URL de la couche  (ex. .../FeatureServer/0)
+      where        : filtre attributaire optionnel (ex. "Type_Iti=1")
+      out_sr       : EPSG de sortie (défaut 4326)
+      page_size    : nb entités par page (défaut 2000)
+    """
+    conn = src['conn']
+    layer_url = conn['url'].rstrip('/')
+    where = conn.get('where', '1=1')
+    out_sr = conn.get('out_sr', 4326)
+    page_size = int(conn.get('page_size', 2000))
+
+    xmin = bbox_2154.xMinimum()
+    xmax = bbox_2154.xMaximum()
+    ymin = bbox_2154.yMinimum()
+    ymax = bbox_2154.yMaximum()
+
+    geometry_param = (
+        f'{{"xmin":{xmin},"ymin":{ymin},"xmax":{xmax},"ymax":{ymax},'
+        f'"spatialReference":{{"wkid":2154}}}}'
+    )
+
+    base_params = (
+        f"where={urllib.parse.quote(where)}"
+        f"&geometry={urllib.parse.quote(geometry_param)}"
+        f"&geometryType=esriGeometryEnvelope"
+        f"&spatialRel=esriSpatialRelIntersects"
+        f"&inSR=2154"
+        f"&outSR={out_sr}"
+        f"&outFields=*"
+        f"&f=geojson"
+        f"&resultRecordCount={page_size}"
+    )
+
+    all_features = []
+    offset = 0
+    while True:
+        url = f"{layer_url}/query?{base_params}&resultOffset={offset}"
+        txt = http_get_sync(url, feedback=feedback)
+        geojson = json.loads(txt)
+        if geojson.get('type') not in ('FeatureCollection', 'Feature'):
+            break
+        page_feats = geojson.get('features', [])
+        all_features.extend(page_feats)
+        if feedback:
+            feedback.pushInfo(f'    ArcGIS page offset={offset} : {len(page_feats)} entités')
+        if len(page_feats) < page_size:
+            break
+        offset += page_size
+
+    if feedback:
+        feedback.pushInfo(f'    ArcGIS : {len(all_features)} entités au total')
+
+    merged = {'type': 'FeatureCollection', 'features': all_features}
+    layer = _geojson_to_layer(merged, src['name'], temp_files)
+
+    crs_str = f'EPSG:{out_sr}'
+    if out_sr == 4326:
+        wgs84 = QgsCoordinateReferenceSystem('EPSG:4326')
+        tr = QgsCoordinateTransform(QgsCoordinateReferenceSystem('EPSG:2154'), wgs84, QgsProject.instance())
+        bb = tr.transformBoundingBox(bbox_2154)
+        bbox_geom = QgsGeometry.fromRect(bb)
+    else:
+        bbox_geom = QgsGeometry.fromRect(bbox_2154)
+
+    feats = [f for f in layer.getFeatures() if not f.geometry().isNull() and f.geometry().intersects(bbox_geom)]
+    if feedback:
+        feedback.pushInfo(f'    ArcGIS après filtre bbox : {len(feats)} entités')
+    return _build_memory(layer, feats, src['name'], crs=crs_str)
+
+
 # ---------- CSV avec colonnes lat/lon ----------
 
 def fetch_from_csv_point(src, bbox_2154, feedback=None, temp_files=None):
@@ -1088,6 +1166,8 @@ def fetch_from_adp_dynamic(src, bbox_2154, feedback=None, temp_files=None):
                 'typename': m['typename'],
                 'version': '1.1.0',
                 'skip_native': True,
+                'skip_geojson': True,
+                'bbox_param': 'boundedBy',
             }
         }
         try:
@@ -1133,6 +1213,137 @@ def fetch_from_adp_dynamic(src, bbox_2154, feedback=None, temp_files=None):
     return pt_layer
 
 
+# ---------- Cache MNT partagé (évite de télécharger 2 fois si MNT + pente cochés) ----------
+
+_mnt_cache: dict = {}        # key → {'event': Event, 'path': str|None}
+_mnt_cache_lock = threading.Lock()
+_mnt_cache_files: list = []  # chemins gérés par le cache (nettoyés par clear_mnt_cache)
+
+
+def clear_mnt_cache():
+    """Vide le cache MNT et supprime les fichiers temporaires associés.
+    À appeler en début et en fin de chaque run dans processAlgorithm.
+    """
+    global _mnt_cache, _mnt_cache_files
+    with _mnt_cache_lock:
+        for p in _mnt_cache_files:
+            try:
+                os.unlink(p)
+            except Exception:
+                pass
+        _mnt_cache.clear()
+        _mnt_cache_files.clear()
+
+
+def _get_mnt_cached(conn, bbox_2154, feedback=None):
+    """Retourne le chemin du MNT téléchargé pour cette BBOX+params.
+
+    - Premier appel : télécharge, met en cache, retourne le chemin.
+    - Appels suivants (même BBOX) : attend si download en cours, retourne le cache.
+    Le fichier est géré par _mnt_cache_files (pas par thread_temp du caller).
+    """
+    key = (
+        round(bbox_2154.xMinimum()), round(bbox_2154.yMinimum()),
+        round(bbox_2154.xMaximum()), round(bbox_2154.yMaximum()),
+        conn.get('wms_url', ''), conn.get('layer', ''), conn.get('resolution', 5)
+    )
+
+    with _mnt_cache_lock:
+        if key in _mnt_cache:
+            entry = _mnt_cache[key]
+            need_download = False
+        else:
+            entry = {'event': threading.Event(), 'path': None}
+            _mnt_cache[key] = entry
+            need_download = True
+
+    if need_download:
+        # Ce thread télécharge
+        raster_src = {'name': 'MNT (cache)', 'conn': conn}
+        layer = fetch_raster_ign(raster_src, bbox_2154, feedback, None)
+        path = layer.dataProvider().dataSourceUri()
+        with _mnt_cache_lock:
+            entry['path'] = path
+            _mnt_cache_files.append(path)
+        entry['event'].set()
+        if feedback:
+            feedback.pushInfo('    MNT téléchargé et mis en cache')
+        return path
+    else:
+        # Attendre que le thread qui télécharge ait terminé (max 5 min)
+        entry['event'].wait(timeout=300)
+        path = entry['path']
+        if path:
+            if feedback:
+                feedback.pushInfo('    MNT réutilisé depuis cache (pas de second téléchargement)')
+            return path
+        raise IOError('Timeout en attendant le MNT du cache')
+
+
+# ---------- Pente > seuil (slope vectorisé depuis MNT WMS) ----------
+
+def fetch_raster_slope(src, bbox_2154, feedback=None, temp_files=None, output_folder=None):
+    """Calcule la carte de pente (degrés) depuis le MNT 5m sauvegardé (phase 2),
+    ou le télécharge si non disponible (sélection pente seule sans alti).
+    Retourne un QgsRasterLayer sur fichier .tif temporaire.
+
+    conn attendu :
+      dem_nomenclature : nom du fichier .tif MNT (défaut ign_rgealti_5m)
+      dem_folder       : sous-dossier export du MNT (défaut 3-DATA RASTER)
+      dem_wms_url      : URL WMS de secours
+      dem_layer        : couche WMS de secours
+      dem_resolution   : résolution de secours en m (défaut 5)
+    """
+    try:
+        from osgeo import gdal
+    except ImportError as e:
+        raise IOError(f"GDAL Python non disponible pour le calcul de pente : {e}")
+
+    conn = src['conn']
+
+    # 1. Chercher le MNT sauvegardé sur disque (par la source alti de la phase 1)
+    dem_path = None
+    if output_folder:
+        dem_folder = conn.get('dem_folder', '3-DATA RASTER')
+        dem_nomenclature = conn.get('dem_nomenclature', 'ign_rgealti_5m')
+        candidate = os.path.join(output_folder, dem_folder, f'{dem_nomenclature}.tif')
+        if os.path.exists(candidate):
+            dem_path = candidate
+            if feedback:
+                feedback.pushInfo(f'    MNT depuis fichier sauvegardé : {os.path.basename(candidate)}')
+
+    if dem_path is None:
+        mnt_conn = {
+            'wms_url':    conn.get('dem_wms_url', 'https://data.geopf.fr/wms-r'),
+            'layer':      conn.get('dem_layer', 'ELEVATION.ELEVATIONGRIDCOVERAGE.HIGHRES'),
+            'resolution': conn.get('dem_resolution', 5),
+        }
+        dem_path = _get_mnt_cached(mnt_conn, bbox_2154, feedback)
+
+    # 2. Calculer la pente (degrés) avec GDAL DEMProcessing
+    fd, slope_path = tempfile.mkstemp(suffix='_slope.tif')
+    os.close(fd)
+    if temp_files is not None:
+        temp_files.append(slope_path)
+
+    opts = gdal.DEMProcessingOptions(slopeFormat='degree', computeEdges=True)
+    result_ds = gdal.DEMProcessing(slope_path, dem_path, 'slope', options=opts)
+    result_ds = None  # flush et fermeture
+
+    if feedback:
+        feedback.pushInfo('    Carte de pente calculée (degrés)')
+
+    from qgis.core import QgsRasterLayer
+    layer = QgsRasterLayer(slope_path, src['name'])
+    if not layer.isValid():
+        raise IOError(f"Raster de pente invalide : {slope_path}")
+
+    if feedback:
+        feedback.pushInfo(f'    Raster pente : {layer.width()}×{layer.height()} px — OK')
+
+    return layer
+
+
 # ---------- Raster IGN WMS ----------
 
 def fetch_raster_ign(src, bbox_2154, feedback=None, temp_files=None):
@@ -1141,12 +1352,30 @@ def fetch_raster_ign(src, bbox_2154, feedback=None, temp_files=None):
     Utilise WMS 1.3.0 avec EPSG:4326 (lat,lon) comme confirmé par IGN.
     WIDTH/HEIGHT calculés depuis l'emprise EPSG:2154 pour respecter la résolution voulue.
     Cap à 8192 px par dimension (limite serveur IGN).
+    Alimente le cache MNT partagé (_get_mnt_cached) pour éviter un double téléchargement
+    si la source pente est aussi cochée.
     Retourne un QgsRasterLayer sur fichier temporaire .tif.
     """
     conn = src['conn']
     wms_url = conn.get('wms_url', 'https://data.geopf.fr/wms-r')
     layer_name = conn.get('layer', 'ELEVATION.ELEVATIONGRIDCOVERAGE.HIGHRES')
     resolution = float(conn.get('resolution', 5))
+
+    # Si le MNT est déjà en cache (téléchargé par la source pente en parallèle), le réutiliser
+    cache_key = (
+        round(bbox_2154.xMinimum()), round(bbox_2154.yMinimum()),
+        round(bbox_2154.xMaximum()), round(bbox_2154.yMaximum()),
+        wms_url, layer_name, resolution
+    )
+    with _mnt_cache_lock:
+        cached_entry = _mnt_cache.get(cache_key)
+    if cached_entry is not None:
+        cached_entry['event'].wait(timeout=300)
+        if cached_entry['path']:
+            if feedback:
+                feedback.pushInfo('    MNT réutilisé depuis cache (pas de second téléchargement)')
+            from qgis.core import QgsRasterLayer
+            return QgsRasterLayer(cached_entry['path'], src['name'])
 
     # Dimensions en pixels depuis l'emprise Lambert (mètres) → résolution exacte
     w_m = bbox_2154.xMaximum() - bbox_2154.xMinimum()
@@ -1208,12 +1437,22 @@ def fetch_raster_ign(src, bbox_2154, feedback=None, temp_files=None):
     if feedback:
         feedback.pushInfo(f'    Raster : {layer.width()}×{layer.height()} px — OK')
 
+    # Enregistrer dans le cache MNT partagé pour la source pente (si elle tourne en parallèle)
+    with _mnt_cache_lock:
+        if cache_key not in _mnt_cache:
+            event = threading.Event()
+            event.set()
+            _mnt_cache[cache_key] = {'event': event, 'path': tmp_path}
+            _mnt_cache_files.append(tmp_path)
+            # Le fichier est maintenant géré par le cache ET temp_files → double nettoyage
+            # possible mais sans conséquence (os.unlink échoue silencieusement si déjà supprimé)
+
     return layer
 
 
 # ---------- Dispatch ----------
 
-def fetch_source(src, buffer_bbox, dist_km, centroid_wgs, feedback, temp_files):
+def fetch_source(src, buffer_bbox, dist_km, centroid_wgs, feedback, temp_files, output_folder=None):
     typ = src.get('type', '')
     if typ == 'manual':
         if feedback:
@@ -1237,10 +1476,14 @@ def fetch_source(src, buffer_bbox, dist_km, centroid_wgs, feedback, temp_files):
         return fetch_from_overpass(src, buffer_bbox, feedback, temp_files)
     if typ == 'api_csv_point':
         return fetch_from_csv_point(src, buffer_bbox, feedback, temp_files)
+    if typ == 'api_arcgis':
+        return fetch_from_arcgis(src, buffer_bbox, feedback, temp_files)
     if typ == 'api_adp_dynamic':
         return fetch_from_adp_dynamic(src, buffer_bbox, feedback, temp_files)
     if typ == 'raster_ign':
         return fetch_raster_ign(src, buffer_bbox, feedback, temp_files)
+    if typ == 'raster_slope':
+        return fetch_raster_slope(src, buffer_bbox, feedback, temp_files, output_folder=output_folder)
     if feedback:
         feedback.pushWarning(f'    Type non supporté : {typ}')
     return None

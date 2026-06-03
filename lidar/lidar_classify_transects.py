@@ -3,10 +3,10 @@
 Classifier les points LiDAR de transects en segments fonctionnels.
 
 Sorties (toutes optionnelles — laisser vide = désactivée) :
-  ① Points classifiés        — copie avec champ « segment »
-  ② Polygones de segments    — un polygone par classe par transect
-  ③ Synthèse par ligne       — une MultiLineString par id_ligne + largeurs moyennes
-  ④ Profil de largeur        — un point par transect pour grapher l'évolution
+   Points classifiés        — copie avec champ « segment »
+   Polygones de segments    — un polygone par classe par transect
+   Synthèse par ligne       — une MultiLineString par id_ligne + largeurs moyennes
+   Profil de largeur        — un point par transect pour grapher l'évolution
 """
 
 import math
@@ -169,19 +169,19 @@ class LidarClassifyTransectsAlgorithm(QgsProcessingAlgorithm):
         # Sorties optionnelles — laisser vide = désactivée
         self.addParameter(QgsProcessingParameterFeatureSink(
             self.OUT_POINTS,
-            self.tr('① Points classifiés'),
+            self.tr('Points classifiés'),
             optional=True, createByDefault=False))
         self.addParameter(QgsProcessingParameterFeatureSink(
             self.OUT_POLYGONS,
-            self.tr('② Polygones de segments (transects classifiés)'),
+            self.tr('Polygones de segments (transects classifiés)'),
             optional=True, createByDefault=True))
         self.addParameter(QgsProcessingParameterFeatureSink(
             self.OUT_LINES,
-            self.tr('③ Synthèse par ligne (MultiLineString + largeurs)'),
+            self.tr('Synthèse par ligne (MultiLineString + largeurs)'),
             optional=True, createByDefault=True))
         self.addParameter(QgsProcessingParameterFeatureSink(
             self.OUT_PROFILE,
-            self.tr('④ Profil de largeur (un point par transect)'),
+            self.tr('Profil de largeur (un point par transect)'),
             optional=True, createByDefault=False))
 
     # ── traitement ─────────────────────────────────────────────────────────────
@@ -239,7 +239,7 @@ class LidarClassifyTransectsAlgorithm(QgsProcessingAlgorithm):
 
         # ── sinks ─────────────────────────────────────────────────────────────
 
-        # ① Points
+        # Points
         pts_out_fields = QgsFields()
         for i in range(pts_layer.fields().count()):
             pts_out_fields.append(pts_layer.fields().field(i))
@@ -248,7 +248,7 @@ class LidarClassifyTransectsAlgorithm(QgsProcessingAlgorithm):
             parameters, self.OUT_POINTS, context,
             pts_out_fields, QgsWkbTypes.PointZ, crs_2154)
 
-        # ② Polygones
+        # Polygones
         poly_fields = QgsFields()
         for nm, vt in [
             ('id_transect', QVariant.Int),
@@ -265,7 +265,7 @@ class LidarClassifyTransectsAlgorithm(QgsProcessingAlgorithm):
             parameters, self.OUT_POLYGONS, context,
             poly_fields, QgsWkbTypes.Polygon, crs_2154)
 
-        # ③ Synthèse par ligne
+        # Synthèse par ligne
         line_fields = QgsFields()
         line_fields.append(QgsField('id_ligne',     QVariant.Int))
         line_fields.append(QgsField('nb_transects', QVariant.Int))
@@ -275,7 +275,7 @@ class LidarClassifyTransectsAlgorithm(QgsProcessingAlgorithm):
             parameters, self.OUT_LINES, context,
             line_fields, QgsWkbTypes.MultiLineString, crs_2154)
 
-        # ④ Profil
+        # Profil
         prof_fields = QgsFields()
         for nm, vt in [
             ('id_transect', QVariant.Int),
@@ -290,8 +290,8 @@ class LidarClassifyTransectsAlgorithm(QgsProcessingAlgorithm):
             prof_fields, QgsWkbTypes.Point, crs_2154)
 
         # ── traitement par transect ───────────────────────────────────────────
-        fid_to_label = {}   # pour ① Points
-        by_ligne = {}       # pour ③ Synthèse
+        fid_to_label = {}   # pour Points
+        by_ligne = {}       # pour Synthèse
 
         total = len(pts_by_tid)
         for step, (tid, raw_pts) in enumerate(sorted(pts_by_tid.items())):
@@ -339,7 +339,7 @@ class LidarClassifyTransectsAlgorithm(QgsProcessingAlgorithm):
                     ])
                     sink_poly.addFeature(pf)
 
-            # ④ Profil ────────────────────────────────────────────────────────
+            #  Profil ────────────────────────────────────────────────────────
             if sink_prof:
                 # Point = milieu du segment chaussée (ou centre des points)
                 ch_segs = [s for s in segs if s['label'] == 'chaussee']
@@ -356,7 +356,7 @@ class LidarClassifyTransectsAlgorithm(QgsProcessingAlgorithm):
                 pf.setAttributes(attrs)
                 sink_prof.addFeature(pf)
 
-            # Accumulation pour ③ ─────────────────────────────────────────────
+            # Accumulation pour Synthèse ─────────────────────────────────────────────
             if sink_lines:
                 entry = by_ligne.setdefault(id_ligne, {
                     'count': 0,
@@ -368,7 +368,7 @@ class LidarClassifyTransectsAlgorithm(QgsProcessingAlgorithm):
                     entry['widths'][lbl] += widths[lbl]
                 entry['geoms'].append(tinfo['geom'])
 
-        # ① Points classifiés ─────────────────────────────────────────────────
+        #  Points classifiés ─────────────────────────────────────────────────
         if sink_pts:
             for feat in pts_layer.getFeatures():
                 lbl = fid_to_label.get(feat.id(), '')
@@ -377,7 +377,7 @@ class LidarClassifyTransectsAlgorithm(QgsProcessingAlgorithm):
                 nf.setAttributes(list(feat.attributes()) + [lbl])
                 sink_pts.addFeature(nf)
 
-        # ③ Synthèse par ligne ────────────────────────────────────────────────
+        #  Synthèse par ligne ────────────────────────────────────────────────
         if sink_lines:
             for id_ligne, entry in sorted(by_ligne.items()):
                 n = entry['count']
@@ -416,12 +416,12 @@ class LidarClassifyTransectsAlgorithm(QgsProcessingAlgorithm):
             '- Points LiDAR avec champs id_transect, d_along, z, classification\n'
             '- Transects avec champs id_transect, id_ligne, distance\n\n'
             'Sorties (laisser vide = désactivée) :\n'
-            '① Points classifiés — copie avec champ « segment »\n'
-            '② Polygones de segments — un bandeau par classe par transect\n'
+            ' Points classifiés — copie avec champ « segment »\n'
+            ' Polygones de segments — un bandeau par classe par transect\n'
             '   (utiliser la symbologie catégorisée sur « segment »)\n'
-            '③ Synthèse par ligne — une MultiLineString par id_ligne\n'
+            ' Synthèse par ligne — une MultiLineString par id_ligne\n'
             '   avec largeurs moyennes (larg_chaussee, larg_trottoir…)\n'
-            '④ Profil de largeur — un point par transect positionné sur la\n'
+            ' Profil de largeur — un point par transect positionné sur la\n'
             '   chaussée, avec largeurs → graphable en fonction de « distance »\n\n'
             'Seuils (en mètres au-dessus du plancher z de la chaussée) :\n'
             '  chaussée < seuil_caniveau < caniveau < seuil_trottoir\n'

@@ -22,7 +22,7 @@ def _gps_time_to_utc(adjusted_gps_time):
     except Exception:
         return ''
 
-# Lib path + DLL copclib
+# Lib path + DLL copclib (import différé pour ne pas verrouiller le .pyd au démarrage)
 _plugin_dir = os.path.dirname(os.path.dirname(__file__))
 _lib_dir = os.path.join(_plugin_dir, 'lib')
 if _lib_dir not in sys.path:
@@ -30,8 +30,6 @@ if _lib_dir not in sys.path:
 _copclib_bin = os.path.join(_lib_dir, 'copclib', 'bin')
 if os.path.isdir(_copclib_bin) and hasattr(os, 'add_dll_directory'):
     os.add_dll_directory(_copclib_bin)
-
-import copclib
 
 from qgis.core import (
     QgsProcessing,
@@ -230,6 +228,7 @@ class LidarTransectPointsAlgorithm(QgsProcessingAlgorithm):
 
     def processAlgorithm(self, parameters, context, feedback):
         import numpy as np
+        import copclib
 
         layer = self.parameterAsVectorLayer(parameters, self.INPUT, context)
         buf = self.parameterAsDouble(parameters, self.BUFFER, context)

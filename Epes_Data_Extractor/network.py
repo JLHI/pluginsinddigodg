@@ -28,28 +28,56 @@ def http_get_sync(url, timeout_ms=30000, feedback=None, headers=None):
         raise IOError(msg)
 
 
+from qgis.core import QgsBlockingNetworkRequest
+from qgis.PyQt.QtCore import QUrl
+from qgis.PyQt.QtNetwork import QNetworkRequest
+
+
+def _to_bytes(value):
+    """Encode une valeur d'en-tête HTTP en bytes (latin-1, conformément à RFC 7230)."""
+    return value if isinstance(value, (bytes, bytearray)) else str(value).encode('latin-1')
+
+
 def http_get_bytes(url, timeout_ms=30000, feedback=None, headers=None):
-    """Retourne les bytes bruts sans décodage — préserver l'encodage d'origine (ex. ISO-8859-1 pour GML MapServer)."""
-    timeout_s = timeout_ms / 1000
-    req = urllib.request.Request(url)
-    req.add_header('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) QGIS/3.x')
-    req.add_header('Accept', 'application/json, application/geo+json, application/xml, */*')
+    """Retourne les bytes bruts sans décodage — préserve l'encodage d'origine (ex. ISO-8859-1 pour GML MapServer).
+
+    Transite par QgsNetworkAccessManager (Qt) : respecte le proxy, le magasin de
+    certificats système et les exceptions SSL configurées dans QGIS, et gère les
+    chemins de validation alternatifs — contrairement à urllib + OpenSSL 1.1.1.
+    Thread-safe : QgsBlockingNetworkRequest est conçu pour les threads workers.
+
+    :raises IOError: statut HTTP >= 400, ou échec réseau / SSL.
+    """
+    request = QNetworkRequest(QUrl(url))
+    request.setRawHeader(b'User-Agent', b'Mozilla/5.0 (Windows NT 10.0; Win64; x64) QGIS/3.x')
+    request.setRawHeader(b'Accept', b'application/json, application/geo+json, application/xml, */*')
     for k, v in (headers or {}).items():
-        req.add_header(k, v)
+        request.setRawHeader(_to_bytes(k), _to_bytes(v))
+    request.setAttribute(QNetworkRequest.FollowRedirectsAttribute, True)
     try:
-        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
-            return resp.read()
-    except urllib.error.HTTPError as e:
-        msg = f"Erreur HTTP {e.code} pour {url}"
-        if feedback:
-            feedback.pushWarning(msg)
-        raise IOError(msg)
-    except Exception as e:
-        msg = f"Erreur réseau pour {url} : {e}"
+        request.setTransferTimeout(int(timeout_ms))  # Qt >= 5.15
+    except (AttributeError, TypeError):
+        pass
+
+    blocking = QgsBlockingNetworkRequest()
+    error_code = blocking.get(request)   
+    reply = blocking.reply()
+    status = reply.attribute(QNetworkRequest.HttpStatusCodeAttribute)
+
+    # Distinguer l'erreur HTTP (4xx/5xx) du pur échec réseau, comme l'ancienne version
+    if status is not None and int(status) >= 400:
+        msg = f"Erreur HTTP {int(status)} pour {url}"
         if feedback:
             feedback.pushWarning(msg)
         raise IOError(msg)
 
+    if error_code != QgsBlockingNetworkRequest.NoError:
+        msg = f"Erreur réseau pour {url} : {blocking.errorMessage()}"
+        if feedback:
+            feedback.pushWarning(msg)
+        raise IOError(msg)
+
+    return bytes(reply.content())
 
 def http_get_cas_auth(url, user, password, cas_login_url, timeout_s=120, feedback=None):
     """Auth CAS (SSO) : GET form → parse tokens cachés → POST creds → session → GET données."""

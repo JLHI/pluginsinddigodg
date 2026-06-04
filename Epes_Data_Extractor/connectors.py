@@ -1380,54 +1380,86 @@ def fetch_raster_ign(src, bbox_2154, feedback=None, temp_files=None):
     # Dimensions en pixels depuis l'emprise Lambert (mètres) → résolution exacte
     w_m = bbox_2154.xMaximum() - bbox_2154.xMinimum()
     h_m = bbox_2154.yMaximum() - bbox_2154.yMinimum()
-    _MAX_PX = 8192
-    width  = min(_MAX_PX, max(1, int(round(w_m / resolution))))
-    height = min(_MAX_PX, max(1, int(round(h_m / resolution))))
-    if width == _MAX_PX or height == _MAX_PX:
-        eff_res = max(w_m / width, h_m / height)
-        if feedback:
-            feedback.pushWarning(
-                f'    ⚠ Résolution effective ~{eff_res:.1f}m (limite {_MAX_PX}px atteinte)'
-            )
+    width  = max(1, int(round(w_m / resolution)))
+    height = max(1, int(round(h_m / resolution)))
 
     # Convertir BBOX en WGS84 — WMS 1.3.0 + EPSG:4326 → ordre lat,lon
     wgs84 = QgsCoordinateReferenceSystem('EPSG:4326')
     tr = QgsCoordinateTransform(QgsCoordinateReferenceSystem('EPSG:2154'), wgs84, QgsProject.instance())
     bb = tr.transformBoundingBox(bbox_2154)
-    bbox_str = f"{bb.yMinimum()},{bb.xMinimum()},{bb.yMaximum()},{bb.xMaximum()}"
 
-    url = (
-        f"{wms_url}?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap"
-        f"&LAYERS={layer_name}&STYLES="
-        f"&FORMAT=image/geotiff"
-        f"&CRS=EPSG:4326"
-        f"&BBOX={bbox_str}"
-        f"&WIDTH={width}&HEIGHT={height}"
-        f"&EXCEPTIONS=text/xml"
-    )
-
-    if feedback:
-        feedback.pushInfo(f'    WMS {layer_name} | {width}×{height} px (~{resolution}m)')
-
-    raw = http_get_bytes(url, timeout_ms=300_000, feedback=feedback)
-
-    # Vérification magic bytes TIFF (II=little-endian, MM=big-endian)
-    if len(raw) < 4 or raw[:2] not in (b'II', b'MM'):
-        preview = raw[:500].decode('utf-8', errors='replace')
-        raise IOError(
-            f"WMS : réponse non-TIFF ({len(raw)} o). "
-            f"Layer : '{layer_name}'. Début réponse : {preview[:300]}"
+    def _wms_url(lat_min, lon_min, lat_max, lon_max, px_w, px_h):
+        return (
+            f"{wms_url}?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap"
+            f"&LAYERS={layer_name}&STYLES="
+            f"&FORMAT=image/geotiff&CRS=EPSG:4326"
+            f"&BBOX={lat_min},{lon_min},{lat_max},{lon_max}"
+            f"&WIDTH={px_w}&HEIGHT={px_h}&EXCEPTIONS=text/xml"
         )
 
-    fd, tmp_path = tempfile.mkstemp(suffix='.tif')
+    def _download_tile(lat_min, lon_min, lat_max, lon_max, px_w, px_h, label=''):
+        url = _wms_url(lat_min, lon_min, lat_max, lon_max, px_w, px_h)
+        if feedback:
+            feedback.pushInfo(f'    WMS {label}| {px_w}×{px_h} px (~{resolution}m)')
+        raw = http_get_bytes(url, timeout_ms=900_000, feedback=feedback)
+        if len(raw) < 4 or raw[:2] not in (b'II', b'MM'):
+            preview = raw[:300].decode('utf-8', errors='replace')
+            raise IOError(f"WMS : réponse non-TIFF ({len(raw)} o). Début : {preview}")
+        fd, path = tempfile.mkstemp(suffix='.tif')
+        try:
+            with os.fdopen(fd, 'wb') as f:
+                f.write(raw)
+        except Exception:
+            os.unlink(path)
+            raise
+        if temp_files is not None:
+            temp_files.append(path)
+        return path
+
+    # Tentative en une pièce ; si HTTP 400 (emprise trop grande), découpage 2×2
+    lat_min, lon_min = bb.yMinimum(), bb.xMinimum()
+    lat_max, lon_max = bb.yMaximum(), bb.xMaximum()
     try:
-        with os.fdopen(fd, 'wb') as f:
-            f.write(raw)
-    except Exception:
-        os.unlink(tmp_path)
-        raise
-    if temp_files is not None:
-        temp_files.append(tmp_path)
+        tmp_path = _download_tile(lat_min, lon_min, lat_max, lon_max, width, height)
+    except IOError as e:
+        if 'HTTP 400' not in str(e):
+            raise
+        if feedback:
+            feedback.pushWarning('    ⚠ HTTP 400 → découpage 2×2 tuiles (résolution conservée)')
+        try:
+            from osgeo import gdal
+        except ImportError as ie:
+            raise IOError(f"GDAL Python requis pour le tuilage : {ie}")
+
+        mid_lat = (lat_min + lat_max) / 2
+        mid_lon = (lon_min + lon_max) / 2
+        hw, hh = max(1, width // 2), max(1, height // 2)
+        # Ajuster la moitié haute pour absorber le pixel impair
+        hw2, hh2 = width - hw, height - hh
+        tile_specs = [
+            (lat_min, lon_min, mid_lat, mid_lon, hw,  hh,  'SW '),
+            (lat_min, mid_lon, mid_lat, lon_max, hw2, hh,  'SE '),
+            (mid_lat, lon_min, lat_max, mid_lon, hw,  hh2, 'NW '),
+            (mid_lat, mid_lon, lat_max, lon_max, hw2, hh2, 'NE '),
+        ]
+        tile_paths = [_download_tile(*spec) for spec in tile_specs]
+
+        fd, tmp_path = tempfile.mkstemp(suffix='_merged.tif')
+        os.close(fd)
+        if temp_files is not None:
+            temp_files.append(tmp_path)
+
+        vrt = gdal.BuildVRT('/vsimem/ign_merge.vrt', tile_paths)
+        if vrt is None:
+            raise IOError("Échec BuildVRT pour la fusion des tuiles IGN")
+        out_ds = gdal.Translate(tmp_path, vrt, format='GTiff')
+        vrt = None          # fermer le VRT
+        if out_ds is None:
+            raise IOError("Échec Translate GDAL pour la fusion des tuiles IGN")
+        out_ds = None       # flush et fermeture
+        gdal.Unlink('/vsimem/ign_merge.vrt')
+        if feedback:
+            feedback.pushInfo(f'    4 tuiles fusionnées → {width}×{height} px')
 
     from qgis.core import QgsRasterLayer
     layer = QgsRasterLayer(tmp_path, src['name'])

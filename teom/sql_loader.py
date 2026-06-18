@@ -43,12 +43,12 @@ def execute_sql_list(conn, sql_list, schema, feedback, verbose=True):
 
         try:
             # Cas particulier : SELECT final
-            if "select code_insee, epci, commune," in sql.lower():
+            if "select code_insee, epci, commune, invar" in sql.lower():
                 results_base = conn.executeSql(sql)
                 feedback.pushInfo("→ Résultat request7 chargé en mémoire.")
-                continue
+                continue 
 
-            if "select com, nb_total, base_total, mt_total" in sql.lower():
+            if "select com, nb_total, base_total, mt_total, nb_maison" in sql.lower():
                 results_locaux = conn.executeSql(sql)
                 feedback.pushInfo("→ Résultat type_locaux chargé en mémoire.")
                 continue
@@ -66,4 +66,3 @@ def execute_sql_list(conn, sql_list, schema, feedback, verbose=True):
     feedback.pushInfo("Toutes les requêtes SQL ont été exécutées avec succès.")
 
     return results_base, results_locaux
-

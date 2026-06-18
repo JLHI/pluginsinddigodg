@@ -9,6 +9,8 @@
 -- CLEAN
 -- ============================================================================
 DROP TABLE IF EXISTS request7;
+DROP TABLE IF EXISTS request1;
+DROP SCHEMA IF EXISTS teom_export CASCADE;
 DROP TABLE IF EXISTS request6;
 DROP TABLE IF EXISTS request5;
 DROP TABLE IF EXISTS request4;
@@ -46,7 +48,8 @@ SELECT
     hlmsem,
     gimtom,
     dnbniv,
-    jannat
+    jannat,
+    jdatat
 FROM {schema}.local10;
 
 UPDATE tp_local10 SET dteloc = d.dteloc_lib
@@ -217,7 +220,8 @@ ADD COLUMN code_naf text,
 ADD COLUMN section_naf text,
 ADD COLUMN tx_teom double precision,
 ADD COLUMN mt_teom_ssfg numeric(10,2),
-ADD COLUMN mt_teom_fg numeric(10,2);
+ADD COLUMN mt_teom_fg numeric(10,2),
+ADD COLUMN proba_rprs text;
 
 UPDATE request7 r
 SET epci = e.siren_epci
@@ -239,12 +243,52 @@ SET section_naf = n.section
 FROM teom_data.siren_naf n
 WHERE n.code = r.code_naf;
 
+-- Calcul des résidences secondaires
+
+-- Étape 1 : NC — local non habitation
+UPDATE request7
+SET proba_rprs = 'NC'
+WHERE dteloc NOT IN ('Maison', 'Appartement');
+
+-- Étape 2 : PM — propriétaire personne morale
+UPDATE request7
+SET proba_rprs = 'PM'
+WHERE proba_rprs IS NULL
+  AND dnatpr <> 'PP';  -- adapter selon la valeur exacte dans ta table
+
+-- Étape 3 : NO — non occupé par le propriétaire
+UPDATE request7
+SET proba_rprs = 'NO'
+WHERE proba_rprs IS NULL
+  AND ccthp <> 'P';  -- 'P' = propriétaire occupant dans MAJIC
+
+-- Étape 4 : AC — mutation récente (< 2 ans)
+UPDATE request7
+SET proba_rprs = 'AC'
+WHERE proba_rprs IS NULL
+  AND jdatat IS NOT NULL
+  AND to_date(jdatat, 'DDMMYYYY') > CURRENT_DATE - INTERVAL '2 years';
+
+-- Étape 5 : RP ou RS — comparaison d'adresses (voie + numéro)
+-- Résidence principale si adresse propriétaire == adresse parcelle
+UPDATE request7
+SET proba_rprs = 'RP'
+WHERE proba_rprs IS NULL
+  AND pr_ccovoi = pa_ccovoi
+  AND pr_dnvoiri = pa_dnvoiri
+  AND COALESCE(pr_dindic,'') = COALESCE(pa_dindic,'');
+
+-- Résidence secondaire si adresses différentes
+UPDATE request7
+SET proba_rprs = 'RS'
+WHERE proba_rprs IS NULL;
+
 -- ============================================================================
 -- 4) CALCULS TEOM  (REVENU DU VIEUX CODE)
 -- ============================================================================
 
 UPDATE request7
-SET tx_teom = 0.1224;  -- taux fixe (modifiable si besoin)
+SET tx_teom = 0;  -- taux fixe (modifiable si besoin)
 
 UPDATE request7
 SET mt_teom_ssfg = COALESCE(bateom,0) * COALESCE(tx_teom,0);
@@ -265,3 +309,112 @@ DROP COLUMN pt_pev,
 DROP COLUMN pd_pev;
 
 DELETE FROM request7 WHERE code_insee IS NULL;
+
+
+-- ============================================================================
+-- 5bis) MATÉRIALISATION PERSISTANTE POUR EXPORT (anti-problème de session QGIS)
+-- ============================================================================
+CREATE SCHEMA IF NOT EXISTS teom_export;
+
+DROP TABLE IF EXISTS teom_export.request7_export;
+
+CREATE TABLE teom_export.request7_export AS
+SELECT *
+FROM request7;
+
+-- ============================================================================
+-- 6) EXPORT FINAL - détail
+-- ============================================================================
+CREATE TABLE teom_export.type_locaux AS
+WITH total AS (
+    SELECT commune AS com,
+           COUNT(bateom) AS nb_total,
+           SUM(bateom) AS base_total,
+           SUM(mt_teom_ssfg) AS mt_total
+    FROM request7
+    WHERE gdesip = '1'
+    GROUP BY commune
+),
+maison AS (
+    SELECT commune AS com,
+           COUNT(*) AS nb_maison,
+           SUM(bateom) AS base_maison,
+           SUM(mt_teom_ssfg) AS mt_maison
+    FROM request7
+    WHERE gdesip='1' AND dteloc='Maison'
+    GROUP BY commune
+),
+appartement AS (
+    SELECT commune AS com,
+           COUNT(*) AS nb_appartement,
+           SUM(bateom) AS base_appartement,
+           SUM(mt_teom_ssfg) AS mt_appartement
+    FROM request7
+    WHERE gdesip='1' AND dteloc='Appartement'
+    GROUP BY commune
+),
+dependance AS (
+    SELECT commune AS com,
+           COUNT(*) AS nb_dependance,
+           SUM(bateom) AS base_dependance,
+           SUM(mt_teom_ssfg) AS mt_dependance
+    FROM request7
+    WHERE gdesip='1' AND dteloc='Dépendances'
+    GROUP BY commune
+),
+comind AS (
+    SELECT commune AS com,
+           COUNT(*) AS nb_comind,
+           SUM(bateom) AS base_comind,
+           SUM(mt_teom_ssfg) AS mt_comind
+    FROM request7
+    WHERE gdesip='1' AND dteloc='Local commercial ou industriel'
+    GROUP BY commune
+),
+res_secondaire AS (
+    SELECT commune AS com,
+           COUNT(*) AS nb_res_secondaire,
+           SUM(bateom) AS base_res_secondaire,
+           SUM(mt_teom_ssfg) AS mt_res_secondaire
+    FROM request7
+    WHERE gdesip = '1'
+      AND proba_rprs = 'RS'
+      AND dteloc IN ('Maison', 'Appartement')
+    GROUP BY commune
+)
+
+SELECT *
+FROM total t
+LEFT JOIN maison m USING(com)
+LEFT JOIN appartement a USING(com)
+LEFT JOIN dependance d USING(com)
+LEFT JOIN comind c USING(com)
+LEFT JOIN res_secondaire rs USING(com);
+
+-- ============================================================================
+-- 7) EXPORT FINAL
+-- ============================================================================
+select code_insee, epci, commune, invar, p_parcelle, ccopre, ccosec, dnupla, dnubat, descr, dniv, dpor,
+    pa_ccovoi, pa_ccoriv, pa_dnvoiri, pa_dindic, cconvo, dvoilib,
+    comptecommunal, dteloc, cconlc, dnatlc, hlmsem, gimtom, gtauom, dcomrd,
+    dnupev, ccoaff, ccthp, topcn, tpevtieom,
+    bateom, baomec, mvltieomx,
+    tx_teom, mt_teom_ssfg, mt_teom_fg,
+    cconad, ccodro, gdesip, dnatpr, ccogrm, dforme,
+    code_naf, section_naf,
+    ddenom, dlign3, dlign4, dlign5, dlign6,
+    pr_ccovoi, pr_ccoriv, pr_dnvoiri, pr_dindic, ccopos,
+    dnomlp, dprnlp, dsiren, dformjur,
+    dnbniv, jannat,
+    ggazlc, gelelc, geaulc, dnbpdc, dsupdc, dmatgm, dmatto, detent, proba_rprs
+FROM teom_export.request7_export;
+select com, nb_total, base_total, mt_total, nb_maison, base_maison, mt_maison,
+    nb_appartement, base_appartement, mt_appartement,
+    nb_dependance, base_dependance, mt_dependance,
+    nb_comind, base_comind, mt_comind, nb_res_secondaire, base_res_secondaire, mt_res_secondaire
+FROM teom_export.type_locaux;
+-- ============================================================================
+-- 8) NETTOYAGE
+-- ============================================================================
+
+DROP SCHEMA IF EXISTS teom_export CASCADE;

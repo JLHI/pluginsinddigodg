@@ -35,6 +35,8 @@ import sys
 import inspect
 
 from qgis.core import QgsProcessingAlgorithm, QgsApplication
+from qgis.PyQt.QtGui import QIcon
+from qgis.PyQt.QtWidgets import QAction
 from .PluginsInddigoDG_provider import PluginsInddigoDGProvider
 
 cmd_folder = os.path.split(inspect.getfile(inspect.currentframe()))[0]
@@ -42,17 +44,23 @@ cmd_folder = os.path.split(inspect.getfile(inspect.currentframe()))[0]
 if cmd_folder not in sys.path:
     sys.path.insert(0, cmd_folder)
 
+# Menu (sous-menu Extensions) regroupant les interfaces personnalisées.
+MENU = "PluginsInddigoDG"
+
 
 class PluginsInddigoDGPlugin(object):
 
-    def __init__(self):
+    def __init__(self, iface=None):
         """Constructeur du plugin.
 
         QGIS appelle `classFactory(iface)` et s'attend à pouvoir instancier
         la classe en lui passant l'interface `iface`. On accepte donc `iface`
         en argument, avec valeur par défaut `None` pour rester compatible.
         """
+        self.iface = iface
         self.provider = None
+        self.flux_action = None
+        self.flux_dialog = None
 
 
     def initProcessing(self):
@@ -63,5 +71,31 @@ class PluginsInddigoDGPlugin(object):
     def initGui(self):
         self.initProcessing()
 
+        # Fenêtre personnalisée « Modélisation flux INSEE » accessible depuis
+        # le menu Extensions et la barre d'outils.
+        if self.iface is not None:
+            icon_path = os.path.join(cmd_folder, "flux_insee", "modelisation_flux_icon.png")
+            icon = QIcon(icon_path) if os.path.exists(icon_path) else QIcon()
+            self.flux_action = QAction(
+                icon, "Modélisation flux INSEE (fenêtre)", self.iface.mainWindow())
+            self.flux_action.setToolTip("Ouvrir la fenêtre de modélisation des flux INSEE")
+            self.flux_action.triggered.connect(self.run_flux_dialog)
+            self.iface.addPluginToMenu(MENU, self.flux_action)
+            self.iface.addToolBarIcon(self.flux_action)
+
+    def run_flux_dialog(self):
+        from .flux_insee.modelisation_flux_dialog import FluxDialog
+        if self.flux_dialog is None:
+            self.flux_dialog = FluxDialog(self.iface)
+        self.flux_dialog.show()
+        self.flux_dialog.raise_()
+        self.flux_dialog.activateWindow()
+
     def unload(self):
-        QgsApplication.processingRegistry().removeProvider(self.provider)
+        if self.provider is not None:
+            QgsApplication.processingRegistry().removeProvider(self.provider)
+            self.provider = None
+        if self.iface is not None and self.flux_action is not None:
+            self.iface.removePluginMenu(MENU, self.flux_action)
+            self.iface.removeToolBarIcon(self.flux_action)
+            self.flux_action = None

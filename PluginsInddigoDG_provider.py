@@ -16,24 +16,13 @@ from .gtfs_stops_to_routes_ign.gtfs_stops_to_route_ign import GtfsRouteIgn
 from .Itineraire_ign.ItineraireParLaRoute_algorithm import ItineraireParLaRouteAlgorithm
 from .isochrone_ign.isochrone_ign import IsochroneIgnAlgorithm
 from .flux_insee.flux_insee import FluxInseeAlgorithm
+from .flux_insee.modelisation_flux import ModelisationFluxAlgorithm
 from .teom.teom import CalculTEOMAlgorithm
 from .metaddigo.metaddigo import MetaddigoExportMetadataAlgorithm
 
 from .sinp.sinp import MappingNaturalistDataToSinpAlgorithm
 from .formulaire_odk.formulaire_odk import OdkFormToQgis
-from .lidar.lidar import GenerateTransectsAlgorithm
-from .lidar.lidar_points import LidarTransectPointsAlgorithm
-from .lidar.lidar_clip_parcels import ClipTransectsByParcelsAlgorithm
-try:
-    from .lidar.lidar_urban_profile import LidarRoadProfileAlgorithm
-    _HAS_URBAN_PROFILE = True
-except ImportError:
-    _HAS_URBAN_PROFILE = False
-    QgsMessageLog.logMessage(
-        'numpy manquant — LidarRoadProfileAlgorithm désactivé. '
-        'Installez numpy dans votre environnement QGIS pour activer cet outil.',
-        'PluginsInddigoDG', Qgis.Warning
-    )
+# NB : les géotraitements LiDAR ont été extraits dans le plugin distinct « LidarDG ».
 from .Epes_Data_Extractor.epes_data_extractor import AutoDataPrepAlgorithm
 class PluginsInddigoDGProvider(QgsProcessingProvider):
 
@@ -45,6 +34,7 @@ class PluginsInddigoDGProvider(QgsProcessingProvider):
 
     def unload(self):
         pass
+    
 
        # --------------------------
     #  ALGORITHMES DU PROVIDER
@@ -55,16 +45,15 @@ class PluginsInddigoDGProvider(QgsProcessingProvider):
         self.addAlgorithm(ArbreDeRabattementAlgorithm())
         self.addAlgorithm(GtfsRouteIgn())
         self.addAlgorithm(ItineraireParLaRouteAlgorithm())
-        self.addAlgorithm(LidarRoadProfileAlgorithm())
         self.addAlgorithm(CalculTEOMAlgorithm())
         self.addAlgorithm(FluxInseeAlgorithm())
+        # Enregistré pour apparaître dans la boîte à outils : son formulaire
+        # standard est remplacé par la fenêtre custom (createCustomParametersWidget).
+        self.addAlgorithm(ModelisationFluxAlgorithm())
         self.addAlgorithm(MetaddigoExportMetadataAlgorithm())
         self.addAlgorithm(MappingNaturalistDataToSinpAlgorithm())
         #self.addAlgorithm(OdkFormToQgis())
-        self.addAlgorithm(GenerateTransectsAlgorithm())
-        self.addAlgorithm(LidarTransectPointsAlgorithm())
-        self.addAlgorithm(ClipTransectsByParcelsAlgorithm())
-        self.addAlgorithm(LidarRoadProfileAlgorithm())
+        # Les géotraitements LiDAR ont été déplacés dans le plugin distinct « LidarDG ».
         self.addAlgorithm(AutoDataPrepAlgorithm())
         self._check_epes_credentials()
 

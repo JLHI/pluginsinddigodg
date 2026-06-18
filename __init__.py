@@ -49,4 +49,4 @@ def classFactory(iface):
     Charge la classe principale du plugin
     """
     from .PluginsInddigoDG import PluginsInddigoDGPlugin
-    return PluginsInddigoDGPlugin()
+    return PluginsInddigoDGPlugin(iface)

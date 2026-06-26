@@ -24,6 +24,7 @@ from .sinp.sinp import MappingNaturalistDataToSinpAlgorithm
 from .formulaire_odk.formulaire_odk import OdkFormToQgis
 # NB : les géotraitements LiDAR ont été extraits dans le plugin distinct « LidarDG ».
 from .Epes_Data_Extractor.epes_data_extractor import AutoDataPrepAlgorithm
+from .compression_images.compression_images import CompressionImagesAlgorithm
 class PluginsInddigoDGProvider(QgsProcessingProvider):
 
     # --------------------------
@@ -55,6 +56,7 @@ class PluginsInddigoDGProvider(QgsProcessingProvider):
         #self.addAlgorithm(OdkFormToQgis())
         # Les géotraitements LiDAR ont été déplacés dans le plugin distinct « LidarDG ».
         self.addAlgorithm(AutoDataPrepAlgorithm())
+        self.addAlgorithm(CompressionImagesAlgorithm())
         self._check_epes_credentials()
 
     def _check_epes_credentials(self):

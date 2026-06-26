@@ -185,7 +185,7 @@ class CalculTEOMAlgorithm(QgsProcessingAlgorithm):
                 "Année de construction", "Présence du gaz", "Présence d’électricité",
                 "Présence d’eau", "Nombre de pièce", "Superficie des pièces",
                 "Matériaux des gros murs", "Matériaux des toitures",
-                "État d’entretien"
+                "État d’entretien", "Résidences secondaires"
             )
 
             headings_locaux = (
@@ -208,7 +208,11 @@ class CalculTEOMAlgorithm(QgsProcessingAlgorithm):
 
                 "Nombre de locaux Commerciaux et Industriels",
                 "Base TEOM Locaux Commerciaux et Industriels",
-                "Montant TEOM Locaux Commerciaux et Industriels"
+                "Montant TEOM Locaux Commerciaux et Industriels",
+
+                "Nombre de Résidences Secondaires",
+                "Base TEOM Résidences Secondaires",
+                "Montant TEOM Résidences Secondaires"
             )
 
             # -------------------------

@@ -66,4 +66,3 @@ def execute_sql_list(conn, sql_list, schema, feedback, verbose=True):
     feedback.pushInfo("Toutes les requêtes SQL ont été exécutées avec succès.")
 
     return results_base, results_locaux
-

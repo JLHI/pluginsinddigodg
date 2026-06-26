@@ -27,6 +27,7 @@ DROP TABLE IF EXISTS tp_pevprincipale;
 DROP TABLE IF EXISTS tp_pevtaxation;
 DROP TABLE IF EXISTS tp_pevdependances;
 DROP TABLE IF EXISTS type_locaux;
+DROP TABLE IF EXISTS tp_nb_logt_proprio;
 
 -- ============================================================================
 -- 1) TABLES TEMPORAIRES – normalisation MAJIC
@@ -48,7 +49,8 @@ SELECT
     hlmsem,
     gimtom,
     dnbniv,
-    jannat
+    jannat,
+    jdatat
 FROM {schema}.local10;
 
 UPDATE tp_local10 SET dteloc = d.dteloc_lib
@@ -219,7 +221,8 @@ ADD COLUMN code_naf text,
 ADD COLUMN section_naf text,
 ADD COLUMN tx_teom double precision,
 ADD COLUMN mt_teom_ssfg numeric(10,2),
-ADD COLUMN mt_teom_fg numeric(10,2);
+ADD COLUMN mt_teom_fg numeric(10,2),
+ADD COLUMN proba_rprs text;
 
 UPDATE request7 r
 SET epci = e.siren_epci
@@ -241,12 +244,90 @@ SET section_naf = n.section
 FROM teom_data.siren_naf n
 WHERE n.code = r.code_naf;
 
+-- Calcul des résidences secondaires
+
+-- Étape 1 : NC — local non habitation
+UPDATE request7
+SET proba_rprs = 'NC'
+WHERE dteloc NOT IN ('Maison', 'Appartement');
+
+-- Étape 2 : PM — propriétaire personne morale
+-- Dans MAJIC, dnatpr est NULL pour les personnes physiques
+-- et renseigné (HLM, CLL, SEM...) pour les personnes morales
+UPDATE request7
+SET proba_rprs = 'PM'
+WHERE proba_rprs IS NULL
+  AND dnatpr IS NOT NULL;
+
+-- Étape 3 : NO — non occupé par le propriétaire
+-- ⚠ ccthp non alimenté sur millésimes 2023+ (suppression TH)
+-- Conservé pour compatibilité avec les millésimes antérieurs
+UPDATE request7
+SET proba_rprs = 'NO'
+WHERE proba_rprs IS NULL
+  AND ccthp IS NOT NULL
+  AND ccthp <> 'P';
+
+-- Étape 4 : INCONNU — date de mutation inconnue
+UPDATE request7
+SET proba_rprs = 'INCONNU'
+WHERE proba_rprs IS NULL
+  AND jdatat IS NULL;
+
+-- Étape 5 : AC — acquisition récente (< 2 ans)
+-- Adresse propriétaire potentiellement non mise à jour dans MAJIC
+UPDATE request7
+SET proba_rprs = 'AC'
+WHERE proba_rprs IS NULL
+  AND to_date(jdatat, 'DDMMYYYY') > CURRENT_DATE - INTERVAL '2 years';
+
+-- Étape 5 : RP ou RS — comparaison d'adresses (voie + numéro)
+-- Résidence principale si adresse propriétaire == adresse parcelle
+UPDATE request7
+SET proba_rprs = 'RP'
+WHERE proba_rprs IS NULL
+  AND pr_ccovoi = pa_ccovoi
+  AND pr_dnvoiri = pa_dnvoiri
+  AND COALESCE(pr_dindic,'') = COALESCE(pa_dindic,'');
+
+-- Résidence secondaire si adresses différentes
+UPDATE request7
+SET proba_rprs = 'RS'
+WHERE proba_rprs IS NULL;
+
+-- ============================================================================
+-- CORRECTIF rppo_rs
+-- Principe : un proprio personne physique (dnatpr IS NULL) qui ne possède
+-- qu'UN SEUL logement dans la commune est très probablement occupant
+-- de sa résidence principale → RS → RP
+-- ============================================================================
+
+CREATE TEMP TABLE tp_nb_logt_proprio AS
+SELECT
+    comptecommunal,
+    commune,
+    COUNT(*) AS nb_logt
+FROM request7
+WHERE dteloc IN ('Maison', 'Appartement')
+  AND dnatpr IS NULL
+  AND proba_rprs IN ('RS', 'RP')
+GROUP BY comptecommunal, commune;
+
+UPDATE request7 r
+SET proba_rprs = 'RP'
+FROM tp_nb_logt_proprio n
+WHERE r.comptecommunal = n.comptecommunal
+  AND r.commune = n.commune
+  AND n.nb_logt = 1
+  AND r.proba_rprs = 'RS';
+
+
 -- ============================================================================
 -- 4) CALCULS TEOM  (REVENU DU VIEUX CODE)
 -- ============================================================================
 
 UPDATE request7
-SET tx_teom = 0.1224;  -- taux fixe (modifiable si besoin)
+SET tx_teom = 0;  -- taux fixe (modifiable si besoin)
 
 UPDATE request7
 SET mt_teom_ssfg = COALESCE(bateom,0) * COALESCE(tx_teom,0);
@@ -329,13 +410,25 @@ comind AS (
     FROM request7
     WHERE gdesip='1' AND dteloc='Local commercial ou industriel'
     GROUP BY commune
+),
+res_secondaire AS (
+    SELECT commune AS com,
+           COUNT(*) AS nb_res_secondaire,
+           SUM(bateom) AS base_res_secondaire,
+           SUM(mt_teom_ssfg) AS mt_res_secondaire
+    FROM request7
+    WHERE gdesip = '1'
+      AND proba_rprs = 'RS'
+      AND dteloc IN ('Maison', 'Appartement')
+    GROUP BY commune
 )
 SELECT *
 FROM total t
 LEFT JOIN maison m USING(com)
 LEFT JOIN appartement a USING(com)
 LEFT JOIN dependance d USING(com)
-LEFT JOIN comind c USING(com);
+LEFT JOIN comind c USING(com)
+LEFT JOIN res_secondaire rs USING(com);
 
 -- ============================================================================
 -- 7) EXPORT FINAL
@@ -352,7 +445,7 @@ select code_insee, epci, commune, invar, p_parcelle, ccopre, ccosec, dnupla, dnu
     pr_ccovoi, pr_ccoriv, pr_dnvoiri, pr_dindic, ccopos,
     dnomlp, dprnlp, dsiren, dformjur,
     dnbniv, jannat,
-    ggazlc, gelelc, geaulc, dnbpdc, dsupdc, dmatgm, dmatto, detent
+    ggazlc, gelelc, geaulc, dnbpdc, dsupdc, dmatgm, dmatto, detent, proba_rprs,
 FROM teom_export.request7_export;
 select com, nb_total, base_total, mt_total, nb_maison, base_maison, mt_maison,
     nb_appartement, base_appartement, mt_appartement,

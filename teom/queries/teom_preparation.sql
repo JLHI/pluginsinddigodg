@@ -313,6 +313,33 @@ UPDATE tp_classif SET proba_rprs = 'RP'
 WHERE proba_rprs IS NULL;
 
 -- ============================================================================
+-- CORRECTIF rppo_rs
+-- Principe : un proprio personne physique (dnatpr IS NULL) qui ne possède
+-- qu'UN SEUL logement dans la commune est très probablement occupant
+-- de sa résidence principale → RS → RP
+-- ============================================================================
+
+CREATE TEMP TABLE tp_nb_logt_proprio AS
+SELECT
+    comptecommunal,
+    commune,
+    COUNT(*) AS nb_logt
+FROM request7
+WHERE dteloc IN ('Maison', 'Appartement')
+  AND dnatpr IS NULL
+  AND proba_rprs IN ('RS', 'RP')
+GROUP BY comptecommunal, commune;
+
+UPDATE request7 r
+SET proba_rprs = 'RP'
+FROM tp_nb_logt_proprio n
+WHERE r.comptecommunal = n.comptecommunal
+  AND r.commune = n.commune
+  AND n.nb_logt = 1
+  AND r.proba_rprs = 'RS';
+
+
+-- ============================================================================
 -- 3ter) CALAGE INSEE -> proba_rprs_cal
 --       Le NOMBRE de RS par commune vient de l'INSEE . le MAJIC ne sert
 --       qu'à choisir QUELLES parcelles. Totaux communaux = recensement.

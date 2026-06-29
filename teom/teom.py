@@ -185,7 +185,7 @@ class CalculTEOMAlgorithm(QgsProcessingAlgorithm):
                 "Année de construction", "Présence du gaz", "Présence d’électricité",
                 "Présence d’eau", "Nombre de pièce", "Superficie des pièces",
                 "Matériaux des gros murs", "Matériaux des toitures",
-                "État d’entretien", "Résidences secondaires"
+                "État d’entretien", "Résidences secondaires", "Résidences secondaires redressées INSEE"
             )
 
             headings_locaux = (
@@ -212,7 +212,11 @@ class CalculTEOMAlgorithm(QgsProcessingAlgorithm):
 
                 "Nombre de Résidences Secondaires",
                 "Base TEOM Résidences Secondaires",
-                "Montant TEOM Résidences Secondaires"
+                "Montant TEOM Résidences Secondaires",
+
+                "Nombre de Résidences Secondaires Redressées INSEE",
+                "Base TEOM Résidences Secondaires Redressées INSEE",
+                "Montant TEOM Résidences Secondaires Redressées INSEE"
             )
 
             # -------------------------

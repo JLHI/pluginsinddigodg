@@ -35,6 +35,9 @@ from qgis.core import (
     QgsCoordinateTransform, QgsProject,
     QgsProcessing,
     QgsWkbTypes,
+    QgsProcessingParameterProviderConnection,
+    QgsProviderRegistry,
+    QgsProviderConnectionException,
     NULL
 )
 from PyQt5.QtCore import QVariant
@@ -250,67 +253,45 @@ def read_model_csv_template(csv_path, feedback):
     second = rows[1] if len(rows) > 1 else None
     return headers, second
 
-# Lecture d'un fichier CSV avec infos TAXREF pour conversion en dictionnaire python
-def load_taxref_lookup(csv_path, feedback):
-    """
-    Charge TAXREF; détecte la colonne clé parmi : nomCite, nomCite_Fr, nomCite_SINP, libelle, espece, taxon
-    et la colonne 'cdNom'.
-    Construit un lookup double : (clé originale normalisée) et (clé sans accents) -> dict.
-    """
-    lookup = {}
-    # Contrôle existence fichier
-    if not csv_path or not os.path.isfile(csv_path):
-        feedback.pushWarning("CSV TAXREF non trouvé. On tentera d'utiliser les colonnes de la couche.")
-        return lookup
-    
-    encodings_to_try = ["utf-8", "latin-1", "utf-8-sig"]
-    sep = ";"
-    rows = None
-    for enc in encodings_to_try:
-        try:
-            # Détection auto séparateur CSV
-            with open(csv_path, "r", encoding=enc) as f:
-                sample = f.read(4096)
-                try:
-                    dialect = csv.Sniffer().sniff(sample, delimiters=";,")
-                    sep = dialect.delimiter
-                except Exception:
-                    sep = ";"
-            #Lecture du fichier en mode dictionnaire
-            with open(csv_path, "r", encoding=enc) as f:
-                reader = csv.DictReader(f, delimiter=sep)
-                rows = list(reader)
-            feedback.pushInfo(f"Lecture TAXREF avec encodage: {enc} / sep: '{sep}' / lignes: {len(rows)}")
-            break
-        except Exception as e:
-            feedback.pushWarning(f"Echec lecture TAXREF avec encodage {enc}: {e}")
-            continue
+# Lecture de la liste des espèces depuis PostgreSQL pour construire un lookup {libellé normalisé: {cdNom, nomCite}}
+def load_species_lookup_from_db(conn_name, sql, feedback):
+    """Construit le lookup {libellé normalisé: {cdNom, nomCite}} depuis PostgreSQL."""
+    md = QgsProviderRegistry.instance().providerMetadata("postgres")
+    try:
+        conn = md.createConnection(conn_name)
+    except QgsProviderConnectionException as e:
+        raise QgsProcessingException(
+            f"Connexion PostgreSQL '{conn_name}' introuvable ou invalide : {e}")
+
+    try:
+        rows = conn.executeSql(sql)
+    except QgsProviderConnectionException as e:
+        # Serveur injoignable / VPN, authentification, droits, table ou colonne absente
+        raise QgsProcessingException(
+            f"Lecture de la liste des espèces impossible : {e}")
 
     if not rows:
-        feedback.pushWarning("Impossible de lire le CSV TAXREF (encodage inconnu).")
-        return lookup
+        raise QgsProcessingException(
+            "La table des espèces ne renvoie aucune ligne exploitable (cd_ref renseigné).")
 
-    cols = rows[0].keys()
-    candidates_nom = [c for c in cols if normalise(c) in ("nomcite", "nomcite_fr", "nomcite_sinp", "libelle", "espece", "taxon")]
-    col_nom = candidates_nom[0] if candidates_nom else None
-    col_cd  = next((c for c in cols if normalise(c) == "cdnom"), None)
+    lookup, nb_ambigus = {}, 0
+    for nom, nom_vern, lb_nom, cd_ref in rows:
+        entry = {"cdNom": str(cd_ref), "nomCite": lb_nom or nom}
+        # Clé principale : "nom" = valeur saisie dans QField
+        for key in {normalise(nom), normalize_for_match(nom)} - {""}:
+            prev = lookup.get(key)
+            if prev and prev["cdNom"] != entry["cdNom"]:
+                nb_ambigus += 1
+                continue  # on conserve le premier cd_ref rencontré
+            lookup[key] = entry
+        # Clés secondaires (sans écraser) : vernaculaire seul, nom scientifique
+        for label in (nom_vern, lb_nom):
+            if not is_qgis_null(label):
+                lookup.setdefault(normalize_for_match(label), entry)
 
-    if not col_cd or not col_nom:
-        feedback.pushWarning("Colonnes TAXREF non détectées ('cdNom' et 'nomCite/nomCite_Fr').")
-        return lookup
-
-    # Construction: double clé (originale normalisée + clé de match sans accents)
-    for row in rows:
-        nom_raw = row.get(col_nom)
-        cd = row.get(col_cd)
-        if not nom_raw or not cd:
-            continue
-        key_orig  = normalise(nom_raw)             # ex. 'mésange charbonnière'
-        key_match = normalize_for_match(nom_raw)   # ex. 'mesange charbonniere'
-        lookup[key_orig]  = {"cdNom": cd, "nomCite": row.get("nomCite") or nom_raw}
-        lookup[key_match] = {"cdNom": cd, "nomCite": row.get("nomCite") or nom_raw}
-
-    feedback.pushInfo(f"{len(lookup)} clés TAXREF chargées (accent + normalisé).")
+    feedback.pushInfo(f"{len(rows)} espèces lues depuis la base ({len(lookup)} clés).")
+    if nb_ambigus:
+        feedback.pushInfo(f"{nb_ambigus} libellé(s) homonyme(s) dans la table (premier cd_ref conservé).")
     return lookup
 
 # mapping ocStade selon le guide SINP
@@ -332,7 +313,12 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
 
     INPUT = "INPUT"
     OUTPUT = "OUTPUT"
-    TAXREF_CSV = "TAXREF_CSV"
+    DB_CONNECTION = "DB_CONNECTION"
+    SPECIES_TABLE_SQL = (
+        "SELECT nom, nom_vern, lb_nom, cd_ref "
+        "FROM appli_terrain_epes.bio_liste_especes "
+        "WHERE cd_ref IS NOT NULL"
+    )
     MODEL_CSV = "MODEL_CSV"
     INCLUDE_TIME     = "INCLUDE_TIME_COLUMNS"
     ADD_TO_PROJECT = "ADD_TO_PROJECT"
@@ -420,14 +406,11 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
                 optional=True
             )
         )
-        self.addParameter(
-            QgsProcessingParameterFile(
-                self.TAXREF_CSV,
-                self.tr("CSV TAXREF"),
-                behavior=QgsProcessingParameterFile.File,
-                fileFilter="CSV (*.csv)"
-            )
-        )
+        self.addParameter(QgsProcessingParameterProviderConnection(
+            self.DB_CONNECTION,
+            self.tr("Connexion PostgreSQL (liste des espèces)"),
+            "postgres"
+        ))
 
         self.addParameter(QgsProcessingParameterField(self.SPECIES_FIELD, self.tr("Champ espèce"), parentLayerParameterName=self.INPUT, type=QgsProcessingParameterField.Any, defaultValue="Espece"))
         self.addParameter(QgsProcessingParameterField(self.DATE_FIELD, self.tr("Champ date/heure"), parentLayerParameterName=self.INPUT, type=QgsProcessingParameterField.Any, defaultValue="Date_heure"))
@@ -485,7 +468,7 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
         
         output_path = self.parameterAsFileOutput(parameters, self.OUTPUT, context)
         model_csv_path = self.parameterAsFile(parameters, self.MODEL_CSV, context)
-        taxref_csv_path = self.parameterAsFile(parameters, self.TAXREF_CSV, context)
+        conn_name = self.parameterAsConnectionName(parameters, self.DB_CONNECTION, context)
         add_to_project = self.parameterAsBoolean(parameters, self.ADD_TO_PROJECT, context)
         include_time = self.parameterAsBoolean(parameters, self.INCLUDE_TIME, context)
         drop_zero_autre  = self.parameterAsBoolean(parameters, self.DROP_ZERO_AUTRE, context)
@@ -514,6 +497,9 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
 
         simplify_tol = float(self.parameterAsDouble(parameters, self.SIMPLIFY_TOL, context))
 
+        # Chargement de la liste des espèces avant modification de la couche
+        taxref_lookup = load_species_lookup_from_db(conn_name, self.SPECIES_TABLE_SQL, feedback)
+
         # Reprojection -> EPSG:2154
         layer = self.reproject_to_2154(layer_obj, context, feedback)
 
@@ -535,7 +521,6 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
             field_names = layer.fields().names()  # rafraîchir
 
 
-        taxref_lookup = load_taxref_lookup(taxref_csv_path, feedback)
         headers, second_row = read_model_csv_template(model_csv_path, feedback)
 
         feedback.pushInfo(f"Lecture du fichier : {layer.source()}")
@@ -813,7 +798,7 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
             "<h4>Principe général</h4>"
             "<ul>"
             "<li>Lecture d’une couche vectorielle (points, lignes ou polygones)</li>"
-            "<li>Jointure avec un fichier <b>TAXREF</b> pour récupérer le <code>cdNom</code></li>"
+            "<li>Jointure avec la table <b>bio_liste_especes</b> (PostgreSQL) pour récupérer le <code>cdNom</code></li>"
             "<li>Normalisation des dates, heures et effectifs</li>"
             "<li>Export au format <b>CSV</b> ou <b>Excel (.xlsx)</b></li>"
             "</ul>"
@@ -821,7 +806,7 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
             "<h4>Données en entrée</h4>"
             "<ul>"
             "<li><b>Couche SIG</b> : couche vectorielle contenant les observations</li>"
-            "<li><b>CSV TAXREF</b> : fichier officiel TAXREF pour la correspondance taxonomique</li>"
+            "<li><b>CSV TAXREF</b> : Connexion PostgreSQL : connexion QGIS donnant accès aux données à la table d'espèces de la databse applicatifs</li>"
             "<li><b>Modèle CSV DEPOBIO (optionnel)</b> : permet de garantir l’ordre et la complétude des colonnes</li>"
             "</ul>"
 

@@ -38,9 +38,10 @@ from qgis.core import (
     QgsProcessingParameterProviderConnection,
     QgsProviderRegistry,
     QgsProviderConnectionException,
+    QgsVectorDataProvider,
     NULL
 )
-from PyQt5.QtCore import QVariant
+from qgis.PyQt.QtCore import QVariant
 
 # ------------------------------------------------------------------------------------
 # Fonctions utilitaires
@@ -75,8 +76,8 @@ def is_qgis_null(v):
     return False
 
 # Normalise un nom ou valeur
-"""Convertit en minuscule, supprime espaces superflus."""
 def normalise(value):
+    """Convertit en minuscule, supprime espaces superflus."""
     return (str(value or "").strip().lower())
 
 def normalize_for_match(s: str) -> str:
@@ -248,19 +249,32 @@ def read_model_csv_template(csv_path, feedback):
     """
     if not csv_path or not os.path.isfile(csv_path):
         return None, None
-    with open(csv_path, "r", encoding="utf-8") as f:
-        # Lecture des 4096 premiers caractères
-        sample = f.read(4096)
-        # Détection auto du séparateur du fichier .CSV
+
+    # Lecture du fichier complet en testant les encodages courants.
+    # utf-8-sig : UTF-8 avec ou sans BOM ; cp1252 : CSV enregistré par Excel sous Windows.
+    text, used_enc = None, None
+    for enc in ("utf-8-sig", "cp1252"):
         try:
-            dialect = csv.Sniffer().sniff(sample, delimiters=";,")
-            sep = dialect.delimiter
-        except Exception:
-            sep = ";"
-    # Lecture complète du CSV avec le séparateur qui a été deviné
-    with open(csv_path, "r", encoding="utf-8") as f:
-        reader = csv.reader(f, delimiter=sep)
-        rows = list(reader)
+            with open(csv_path, "r", encoding=enc) as f:
+                text = f.read()
+            used_enc = enc
+            break
+        except UnicodeDecodeError:
+            continue
+    if text is None:
+        raise QgsProcessingException(
+            f"Modèle CSV illisible (encodage non reconnu) : {csv_path}. "
+            "Enregistrez-le en 'CSV UTF-8' depuis Excel puis relancez.")
+
+    # Détection auto du séparateur sur le début du fichier
+    try:
+        sep = csv.Sniffer().sniff(text[:4096], delimiters=";,").delimiter
+    except Exception:
+        sep = ";"
+    feedback.pushInfo(f"Modèle CSV lu (encodage : {used_enc}, séparateur : '{sep}').")
+
+    rows = list(csv.reader(text.splitlines(), delimiter=sep))
+
     if not rows:
         return None, None
     # Extraction et nettoyage de la première ligne (celle des en-têtes)
@@ -347,7 +361,6 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
     OCSTADE_FIELD = "OCSTADE_FIELD"
     OCSEX_FIELD = "OCSEX_FIELD"
     COMMENT1_FIELD = "COMMENT1_FIELD"
-    COMMENT2_FIELD = "COMMENT2_FIELD"
     PERMID_FIELD = "PERMID_FIELD"
 
     SIMPLIFY_TOL = "SIMPLIFY_TOL"
@@ -402,6 +415,56 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
         feedback.pushInfo("Reprojection terminée.")
         return new_layer
 
+    # -------------------- Identifiants permanents ------------------------
+    def ensure_perm_ids(self, layer, permid_field, feedback):
+        """
+        Garantit un permId (UUID) sur chaque entité de la couche SOURCE.
+        Les UUID générés sont enregistrés pour rester stables d'un export à l'autre.
+        """
+        provider = layer.dataProvider()
+        caps = provider.capabilities()
+        idx = layer.fields().indexFromName(permid_field)
+
+        # 1. Entités sans permId (toutes si le champ n'existe pas)
+        if idx < 0:
+            missing = [f.id() for f in layer.getFeatures()]
+        else:
+            missing = [f.id() for f in layer.getFeatures() if is_qgis_null(f[permid_field])]
+        if not missing:
+            feedback.pushInfo("Toutes les entités possèdent déjà un permId.")
+            return
+
+        # 2. Contrôles AVANT toute écriture
+        if layer.isEditable():
+            raise QgsProcessingException(
+                "La couche source est en mode édition : enregistrez ou annulez vos "
+                "modifications, quittez le mode édition, puis relancez le traitement.")
+        if not (caps & QgsVectorDataProvider.ChangeAttributeValues):
+            raise QgsProcessingException(
+                f"{len(missing)} entité(s) sans permId mais la couche est en lecture seule"
+                "(format ou droits) : impossible d'enregistrer des permId stables.")
+
+        # 3. Création du champ si absent
+        if idx < 0:
+            if not (caps & QgsVectorDataProvider.AddAttributes) or \
+               not provider.addAttributes([QgsField(permid_field, QVariant.String)]):
+                raise QgsProcessingException(
+                    f"Impossible de créer le champ '{permid_field}' dans la couche source.")
+            layer.updateFields()
+            idx = layer.fields().indexFromName(permid_field)
+            feedback.pushInfo(f"Champ '{permid_field}' créé dans la couche source.")
+
+        # 4. Écriture groupée, validée ou annulée en bloc
+        layer.startEditing()
+        for fid in missing:
+            layer.changeAttributeValue(fid, idx, generate_perm_id())
+        if not layer.commitChanges():
+            errors = "; ".join(layer.commitErrors())
+            layer.rollBack()
+            raise QgsProcessingException(f"Échec de l'enregistrement des permId : {errors}")
+
+        feedback.pushInfo(f"{len(missing)} permId générés et enregistrés dans la couche source.")
+
     # -------------------- Paramètres ------------------------
     def initAlgorithm(self, config):
 
@@ -427,13 +490,12 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
             "postgres"
         ))
 
-        self.addParameter(QgsProcessingParameterField(self.SPECIES_FIELD, self.tr("Champ espèce"), parentLayerParameterName=self.INPUT, type=QgsProcessingParameterField.Any, defaultValue="Espece"))
+        self.addParameter(QgsProcessingParameterField(self.SPECIES_FIELD, self.tr("Champ espèce"), parentLayerParameterName=self.INPUT, type=QgsProcessingParameterField.Any, defaultValue="espece"))
         self.addParameter(QgsProcessingParameterField(self.DATE_FIELD, self.tr("Champ date/heure"), parentLayerParameterName=self.INPUT, type=QgsProcessingParameterField.Any, defaultValue="date_heure"))
-        self.addParameter(QgsProcessingParameterField(self.EFFECTIF_FIELD, self.tr("Champ effectif (denbrMax)"), parentLayerParameterName=self.INPUT, type=QgsProcessingParameterField.Any, defaultValue="denbrMax"))
-        self.addParameter(QgsProcessingParameterField(self.OCSTADE_FIELD, self.tr("Champ statut (ocStade)"), parentLayerParameterName=self.INPUT, type=QgsProcessingParameterField.Any, defaultValue="OcStatut", optional=True))
-        self.addParameter(QgsProcessingParameterField(self.OCSEX_FIELD, self.tr("Champ sexe (ocSex)"), parentLayerParameterName=self.INPUT, type=QgsProcessingParameterField.Any, defaultValue="OcSexe", optional=True))
-        self.addParameter(QgsProcessingParameterField(self.COMMENT1_FIELD, self.tr("Champ commentaire 1"), parentLayerParameterName=self.INPUT, type=QgsProcessingParameterField.Any, defaultValue="Remarque1", optional=True))
-        self.addParameter(QgsProcessingParameterField(self.COMMENT2_FIELD, self.tr("Champ commentaire 2"), parentLayerParameterName=self.INPUT, type=QgsProcessingParameterField.Any, defaultValue="Remarque2", optional=True))
+        self.addParameter(QgsProcessingParameterField(self.EFFECTIF_FIELD, self.tr("Champ effectif (denbrMax)"), parentLayerParameterName=self.INPUT, type=QgsProcessingParameterField.Any, defaultValue="effectif"))
+        self.addParameter(QgsProcessingParameterField(self.OCSTADE_FIELD, self.tr("Champ statut (ocStade)"), parentLayerParameterName=self.INPUT, type=QgsProcessingParameterField.Any, defaultValue="stade_vie", optional=True))
+        self.addParameter(QgsProcessingParameterField(self.OCSEX_FIELD, self.tr("Champ sexe (ocSex)"), parentLayerParameterName=self.INPUT, type=QgsProcessingParameterField.Any, defaultValue="sexe", optional=True))
+        self.addParameter(QgsProcessingParameterField(self.COMMENT1_FIELD, self.tr("Champ commentaire 1"), parentLayerParameterName=self.INPUT, type=QgsProcessingParameterField.Any, defaultValue="commentaire", optional=True))
         self.addParameter(QgsProcessingParameterField(self.PERMID_FIELD, self.tr("Champ identifiant permanent (permId)"), parentLayerParameterName=self.INPUT, type=QgsProcessingParameterField.Any, defaultValue="permId", optional=True))
         
         self.addParameter(QgsProcessingParameterBoolean(self.INCLUDE_TIME, self.tr("Inclure heureDebut/heureFin si une heure est présente"), defaultValue=True))
@@ -497,7 +559,6 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
         ocstade_field  = self.parameterAsString(parameters, self.OCSTADE_FIELD, context)
         ocsex_field    = self.parameterAsString(parameters, self.OCSEX_FIELD, context)
         comment1_field = self.parameterAsString(parameters, self.COMMENT1_FIELD, context)
-        comment2_field = self.parameterAsString(parameters, self.COMMENT2_FIELD, context)
         permid_field   = self.parameterAsString(parameters, self.PERMID_FIELD, context)
         observer_def   = self.parameterAsString(parameters, self.OBSERVER_DEFAULT, context)
         precisgeo_def  = int(self.parameterAsInt(parameters, self.PRECISGEO_DEFAULT, context))
@@ -515,28 +576,14 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
         # Chargement de la liste des espèces avant modification de la couche
         taxref_lookup = load_species_lookup_from_db(conn_name, self.SPECIES_TABLE_SQL, feedback)
 
+        headers, second_row = read_model_csv_template(model_csv_path, feedback)
+
+        # permId : générés et enregistrés dans la couche SOURCE, avant la reprojection
+        permid_field = permid_field or "permId"
+        self.ensure_perm_ids(layer_obj, permid_field, feedback)
+
         # Reprojection -> EPSG:2154
         layer = self.reproject_to_2154(layer_obj, context, feedback)
-
-        if not layer.isEditable():
-            layer.startEditing()
-
-        
-        # ---------------------------------------------------------
-        # Gestion du champ permId (création si absent)
-        # ---------------------------------------------------------
-
-        permid_field = permid_field or "permId"
-        field_names = layer.fields().names()
-
-        if permid_field not in field_names:
-            feedback.pushInfo(f"Création du champ '{permid_field}' (UUID permanent).")
-            layer.dataProvider().addAttributes([QgsField(permid_field, QVariant.String)])
-            layer.updateFields()
-            field_names = layer.fields().names()  # rafraîchir
-
-
-        headers, second_row = read_model_csv_template(model_csv_path, feedback)
 
         feedback.pushInfo(f"Lecture du fichier : {layer.source()}")
         feedback.pushInfo(f"Nombre d'entités : {layer.featureCount()}")
@@ -552,9 +599,18 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
         matched = 0
         unmatched_examples = []
         bad_dates = 0
+        seen_permids, dup_permids = set(), 0
+        skipped_empty = 0
+
+        wkb = layer.wkbType()
+        is_point = QgsWkbTypes.geometryType(wkb) == QgsWkbTypes.PointGeometry
 
         for f in layer.getFeatures():
             species_val = f[species_field] if species_field in field_names else None
+            # Entités sans espèce (saisies vides ou abandonnées sur le terrain) : ignorées
+            if is_qgis_null(species_val):
+                skipped_empty += 1
+                continue
             if drop_zero_autre and str(species_val).strip() == "0_autre":
                 continue
 
@@ -605,28 +661,18 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
             if comment1_field in field_names:
                 v1 = f[comment1_field]
                 if v1: comment_parts.append(str(v1))
-            if comment2_field in field_names:
-                v2 = f[comment2_field]
-                if v2: comment_parts.append(str(v2))
             comment = " | ".join(comment_parts)
 
-            # PermID
-            permId_updates = {}  # {fid: permId}
-
-            # Lire la valeur brute
+            # PermID : garanti en amont par ensure_perm_ids, recopié par la reprojection
             raw_val = f[permid_field] if permid_field in field_names else None
-
-            # Si NULL QGIS ou vide → générer un UUID
-            if is_qgis_null(raw_val):
-                permId = generate_perm_id()
-                permId_updates[f.id()] = permId
-            else:
-                permId = str(raw_val).strip()
+            permId = "" if is_qgis_null(raw_val) else str(raw_val).strip()
+            if permId in seen_permids:
+                dup_permids += 1
+                feedback.pushWarning(f"permId en double pour l'entité {f.id()} : {permId}")
+            seen_permids.add(permId)
 
             # Géométrie WKT
             geom = f.geometry()
-            wkb = layer.wkbType()
-            is_point = QgsWkbTypes.geometryType(wkb) == QgsWkbTypes.PointGeometry
 
             if geom and not geom.isNull() and not is_point and simplify_tol > 0:
                 try:
@@ -634,7 +680,7 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
                 except Exception:
                     wkt = geom.asWkt(3)
             else:
-                wkt = geom.asWkt() if geom and not geom.isNull() else ""
+                wkt = geom.asWkt(2) if geom and not geom.isNull() else ""
 
             # 🔧 NORMALISATION WKT (Polygon -> POLYGON, etc.)
             wkt = normalize_wkt_type(wkt)
@@ -669,20 +715,14 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
                 row["heureFin"]   = hh
 
             processed_rows.append(row)
-        
-        # Appliquer les changements de permId dans la couche
-        if permId_updates:
-            idx = layer.fields().indexFromName(permid_field)
-            for fid, permId in permId_updates.items():
-                layer.changeAttributeValue(fid, idx, permId)
-    
-        # Mettre à jour la couche en mémoire avec les permId générés:
-        if layer.isEditable():
-            layer.commitChanges()
             
-        feedback.pushInfo(f"Jointure TAXREF : {matched} correspondances / {layer.featureCount()} entités.")
+        feedback.pushInfo(f"Jointure TAXREF : {matched} correspondances / {len(processed_rows)} observations exportées.")
         if bad_dates:
             feedback.pushWarning(f"{bad_dates} entité(s) avec date non interprétable (dateDebut vide).")
+        if dup_permids:
+            feedback.pushWarning(f"{dup_permids} permId en double : entités probablement dupliquées dans QField.")
+        if skipped_empty:
+            feedback.pushWarning(f"{skipped_empty} entité(s) sans espèce ignorée(s).")
         if unmatched_examples:
             feedback.pushWarning("Exemples non joints (10 max) : " + ", ".join(unmatched_examples))
 
@@ -793,6 +833,11 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
     # ---Métadonnées
     # ------------------------------------------------------------------------------------
 
+    def flags(self):
+        # Exécution dans le thread principal : l'algorithme modifie la couche
+        # source du projet (permId), ce qui n'est pas sûr depuis un thread secondaire.
+        return super().flags() | QgsProcessingAlgorithm.FlagNoThreading
+
     def name(self):
         return "traitement_donnees_naturaliste_vers_sinp"
 
@@ -827,7 +872,7 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
             "<h4>Données en entrée</h4>"
             "<ul>"
             "<li><b>Couche SIG</b> : couche vectorielle contenant les observations</li>"
-            "<li><b>CSV TAXREF</b> : Connexion PostgreSQL : connexion QGIS donnant accès aux données à la table d'espèces de la databse applicatifs</li>"
+            "<li><b>Connexion PostgreSQL</b> : connexion QGIS donnant accès à la table <code>appli_terrain_epes.bio_liste_especes</code></li>"
             "<li><b>Modèle CSV DEPOBIO (optionnel)</b> : permet de garantir l’ordre et la complétude des colonnes</li>"
             "</ul>"
 

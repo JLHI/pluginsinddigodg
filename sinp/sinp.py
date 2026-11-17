@@ -16,7 +16,7 @@ outils Processing ou via un modèle.
 import os, csv, uuid, datetime, re, unicodedata
 import xlsxwriter
 
-from qgis.PyQt.QtCore import QCoreApplication, QUrl
+from qgis.PyQt.QtCore import QCoreApplication, QUrl, QDateTime, QDate
 from qgis.core import (
     QgsProcessingAlgorithm,
     QgsProcessingParameterVectorLayer,
@@ -112,10 +112,22 @@ def normalize_wkt_type(wkt: str) -> str:
 # Convertir une chaine de txt en date
 def parse_date_time(value):
     """
-    Convertit vers 'DD/MM/YYYY' en supprimant ' (UTC)' et tout contenu entre parenthèses.
+    Convertit vers ('DD/MM/YYYY', 'HH:MM:SS').
+    Accepte : datetime Python, QDateTime/QDate (champs Date/DateTime QGIS),
+    chaînes avec ou sans millisecondes (ex. '2026/04/22 08:21:01.530').
+    Renvoie ("", "") si la valeur est vide ou non interprétable.
     """
-    if value is None:
+    if is_qgis_null(value):
         return "", ""
+    # Types Qt renvoyés par QGIS pour les champs Date / DateTime
+    if isinstance(value, QDateTime):
+        if not value.isValid():
+            return "", ""
+        value = value.toPyDateTime()
+    elif isinstance(value, QDate):
+        if not value.isValid():
+            return "", ""
+        value = value.toPyDate()
     if isinstance(value, datetime.datetime):
         return value.date().strftime("%d/%m/%Y"), value.time().strftime("%H:%M:%S")
     if isinstance(value, datetime.date):
@@ -125,6 +137,9 @@ def parse_date_time(value):
     s = re.sub(r"\s*\(.*?\)\s*", " ", s).strip()
     # essais de formats usuels
     fmts = [
+        # avec millisecondes (QField)
+        "%Y/%m/%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S.%f", "%d/%m/%Y %H:%M:%S.%f",
+        # sans millisecondes
         "%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M",
         "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M",
         "%Y/%m/%d %H:%M:%S", "%Y/%m/%d %H:%M"
@@ -413,7 +428,7 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
         ))
 
         self.addParameter(QgsProcessingParameterField(self.SPECIES_FIELD, self.tr("Champ espèce"), parentLayerParameterName=self.INPUT, type=QgsProcessingParameterField.Any, defaultValue="Espece"))
-        self.addParameter(QgsProcessingParameterField(self.DATE_FIELD, self.tr("Champ date/heure"), parentLayerParameterName=self.INPUT, type=QgsProcessingParameterField.Any, defaultValue="Date_heure"))
+        self.addParameter(QgsProcessingParameterField(self.DATE_FIELD, self.tr("Champ date/heure"), parentLayerParameterName=self.INPUT, type=QgsProcessingParameterField.Any, defaultValue="date_heure"))
         self.addParameter(QgsProcessingParameterField(self.EFFECTIF_FIELD, self.tr("Champ effectif (denbrMax)"), parentLayerParameterName=self.INPUT, type=QgsProcessingParameterField.Any, defaultValue="denbrMax"))
         self.addParameter(QgsProcessingParameterField(self.OCSTADE_FIELD, self.tr("Champ statut (ocStade)"), parentLayerParameterName=self.INPUT, type=QgsProcessingParameterField.Any, defaultValue="OcStatut", optional=True))
         self.addParameter(QgsProcessingParameterField(self.OCSEX_FIELD, self.tr("Champ sexe (ocSex)"), parentLayerParameterName=self.INPUT, type=QgsProcessingParameterField.Any, defaultValue="OcSexe", optional=True))
@@ -536,6 +551,7 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
         
         matched = 0
         unmatched_examples = []
+        bad_dates = 0
 
         for f in layer.getFeatures():
             species_val = f[species_field] if species_field in field_names else None
@@ -563,6 +579,9 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
             # Dates + heure
             date_src = f[date_field] if date_field in field_names else None
             dd, hh = parse_date_time(date_src)
+            if not dd:
+                bad_dates += 1
+                feedback.pushWarning(f"Date non interprétable pour l'entité {f.id()} : '{date_src}'")
             df, hf = dd, hh  # dateFin/heureFin = identiques au début (cf.tuto)
 
 
@@ -662,6 +681,8 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
             layer.commitChanges()
             
         feedback.pushInfo(f"Jointure TAXREF : {matched} correspondances / {layer.featureCount()} entités.")
+        if bad_dates:
+            feedback.pushWarning(f"{bad_dates} entité(s) avec date non interprétable (dateDebut vide).")
         if unmatched_examples:
             feedback.pushWarning("Exemples non joints (10 max) : " + ", ".join(unmatched_examples))
 

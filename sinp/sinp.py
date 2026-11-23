@@ -34,7 +34,7 @@ from qgis.core import (
     QgsCoordinateTransform, QgsProject,
     QgsProcessing,
     QgsWkbTypes,
-    QgsProcessingParameterProviderConnection,
+    QgsDataSourceUri,
     QgsProviderRegistry,
     QgsProviderConnectionException,
     QgsVectorDataProvider,
@@ -240,22 +240,39 @@ def parse_effectif(value):
 def generate_perm_id():
     return str(uuid.uuid4()).replace("{", "").replace("}", "")
 
-# Lecture de la liste des espèces depuis PostgreSQL pour construire un lookup {libellé normalisé: {cdNom, nomCite}}
-def load_species_lookup_from_db(conn_name, sql, feedback):
-    """Construit le lookup {libellé normalisé: {cdNom, nomCite}} depuis PostgreSQL."""
+# Connexions PostgreSQL de l'utilisateur pointant vers le service ou la base demandés (triées par nom)
+def find_db_connections(service):
     md = QgsProviderRegistry.instance().providerMetadata("postgres")
-    try:
-        conn = md.createConnection(conn_name)
-    except QgsProviderConnectionException as e:
-        raise QgsProcessingException(
-            f"Connexion PostgreSQL '{conn_name}' introuvable ou invalide : {e}")
+    if md is None:
+        raise QgsProcessingException("Le fournisseur PostgreSQL n'est pas disponible dans cette installation de QGIS.")
+    found = []
+    for name, conn in sorted(md.connections(False).items()):
+        uri = QgsDataSourceUri(conn.uri())
+        if QgsDataSourceUri(conn.uri()).service() == service:
+            found.append((name, conn))
+    return found
 
-    try:
-        rows = conn.executeSql(sql)
-    except QgsProviderConnectionException as e:
-        # Serveur injoignable / VPN, authentification, droits, table ou colonne absente
+# Lecture de la liste des espèces depuis PostgreSQL pour construire un lookup {libellé normalisé: {cdNom, nomCite}}
+def load_species_lookup_from_db(service, sql, feedback):
+    """Construit le lookup {libellé normalisé: {cdNom, nomCite}} depuis la base dbname."""
+    candidates = find_db_connections(service)
+    if not candidates:
         raise QgsProcessingException(
-            f"Lecture de la liste des espèces impossible : {e}")
+            f"Aucune connexion PostgreSQL utilisant le service « {service} » n'est enregistrée dans QGIS. ")
+    
+    rows, errors = None, []
+    for name, conn in candidates:
+        try:
+            rows = conn.executeSql(sql)
+            feedback.pushInfo(f"Liste des espèces lue via la connexion « {name} ».")
+            break
+        except QgsProviderConnectionException as e:
+            # Serveur injoignable / VPN, authentification, droits, table ou colonne absente
+            errors.append(f"- {name} : {e}")
+
+    if rows is None:
+        raise QgsProcessingException(
+            f"Lecture de la liste des espèces impossible (service « {service} ») :\n" + "\n".join(errors))
 
     if not rows:
         raise QgsProcessingException(
@@ -300,7 +317,7 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
 
     INPUT = "INPUT"
     OUTPUT = "OUTPUT"
-    DB_CONNECTION = "DB_CONNECTION"
+    SPECIES_SERVICE = "appli"
     SPECIES_TABLE_SQL = (
         "SELECT nom, nom_vern, lb_nom, cd_ref "
         "FROM appli_terrain_epes.bio_liste_especes "
@@ -432,11 +449,6 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
                 [QgsProcessing.TypeVectorAnyGeometry],  # accepte point/ligne/polygone
             )
         )
-        self.addParameter(QgsProcessingParameterProviderConnection(
-            self.DB_CONNECTION,
-            self.tr("Connexion PostgreSQL (liste des espèces)"),
-            "postgres"
-        ))
 
         self.addParameter(QgsProcessingParameterField(self.SPECIES_FIELD, self.tr("Champ espèce"), parentLayerParameterName=self.INPUT, type=QgsProcessingParameterField.Any, defaultValue="espece"))
         self.addParameter(QgsProcessingParameterField(self.DATE_FIELD, self.tr("Champ date/heure"), parentLayerParameterName=self.INPUT, type=QgsProcessingParameterField.Any, defaultValue="date_heure"))
@@ -492,7 +504,6 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
             raise QgsProcessingException(self.tr("La couche/fichier d'entrée n'est pas valide."))
         
         output_path = self.parameterAsFileOutput(parameters, self.OUTPUT, context)
-        conn_name = self.parameterAsConnectionName(parameters, self.DB_CONNECTION, context)
         add_to_project = self.parameterAsBoolean(parameters, self.ADD_TO_PROJECT, context)
         include_time = self.parameterAsBoolean(parameters, self.INCLUDE_TIME, context)
         drop_zero_autre  = self.parameterAsBoolean(parameters, self.DROP_ZERO_AUTRE, context)
@@ -521,7 +532,7 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
         simplify_tol = float(self.parameterAsDouble(parameters, self.SIMPLIFY_TOL, context))
 
         # Chargement de la liste des espèces avant modification de la couche
-        taxref_lookup = load_species_lookup_from_db(conn_name, self.SPECIES_TABLE_SQL, feedback)
+        taxref_lookup = load_species_lookup_from_db(self.SPECIES_SERVICE, self.SPECIES_TABLE_SQL, feedback)
 
         # permId : générés et enregistrés dans la couche SOURCE, avant la reprojection
         permid_field = permid_field or "permId"
@@ -804,7 +815,7 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
             "<h4>Données en entrée</h4>"
             "<ul>"
             "<li><b>Couche SIG</b> : couche vectorielle contenant les observations</li>"
-            "<li><b>Connexion PostgreSQL</b> : connexion QGIS donnant accès à la table <code>appli_terrain_epes.bio_liste_especes</code></li>"
+            "<li><b>Liste des espèces</b> : lue automatiquement dans la table <code>appli_terrain_epes.bio_liste_especes</code> de la base <b>applicatifs</b>, via une connexion PostgreSQL enregistrée dans QGIS (service <code>pg_service.conf</code> ou base <b>applicatifs</b>)</li>"
             "</ul>"
 
             "<h4>Champs attendus dans la couche</h4>"

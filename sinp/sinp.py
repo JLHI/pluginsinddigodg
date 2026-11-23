@@ -20,7 +20,6 @@ from qgis.PyQt.QtCore import QCoreApplication, QUrl, QDateTime, QDate
 from qgis.core import (
     QgsProcessingAlgorithm,
     QgsProcessingParameterVectorLayer,
-    QgsProcessingParameterFile,
     QgsProcessingParameterFileDestination,
     QgsProcessingParameterField,
     QgsProcessingParameterString,
@@ -241,47 +240,6 @@ def parse_effectif(value):
 def generate_perm_id():
     return str(uuid.uuid4()).replace("{", "").replace("}", "")
 
-# Récuperer les en-tête d'un fichier CSV
-def read_model_csv_template(csv_path, feedback):
-    """
-    Lit le Modèle CSV officiel (si fourni) :
-    - retourne (headers, second_row) où second_row est la ligne d'astérisques.
-    """
-    if not csv_path or not os.path.isfile(csv_path):
-        return None, None
-
-    # Lecture du fichier complet en testant les encodages courants.
-    # utf-8-sig : UTF-8 avec ou sans BOM ; cp1252 : CSV enregistré par Excel sous Windows.
-    text, used_enc = None, None
-    for enc in ("utf-8-sig", "cp1252"):
-        try:
-            with open(csv_path, "r", encoding=enc) as f:
-                text = f.read()
-            used_enc = enc
-            break
-        except UnicodeDecodeError:
-            continue
-    if text is None:
-        raise QgsProcessingException(
-            f"Modèle CSV illisible (encodage non reconnu) : {csv_path}. "
-            "Enregistrez-le en 'CSV UTF-8' depuis Excel puis relancez.")
-
-    # Détection auto du séparateur sur le début du fichier
-    try:
-        sep = csv.Sniffer().sniff(text[:4096], delimiters=";,").delimiter
-    except Exception:
-        sep = ";"
-    feedback.pushInfo(f"Modèle CSV lu (encodage : {used_enc}, séparateur : '{sep}').")
-
-    rows = list(csv.reader(text.splitlines(), delimiter=sep))
-
-    if not rows:
-        return None, None
-    # Extraction et nettoyage de la première ligne (celle des en-têtes)
-    headers = [h.strip() for h in rows[0]]
-    second = rows[1] if len(rows) > 1 else None
-    return headers, second
-
 # Lecture de la liste des espèces depuis PostgreSQL pour construire un lookup {libellé normalisé: {cdNom, nomCite}}
 def load_species_lookup_from_db(conn_name, sql, feedback):
     """Construit le lookup {libellé normalisé: {cdNom, nomCite}} depuis PostgreSQL."""
@@ -348,8 +306,7 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
         "FROM appli_terrain_epes.bio_liste_especes "
         "WHERE cd_ref IS NOT NULL"
     )
-    MODEL_CSV = "MODEL_CSV"
-    INCLUDE_TIME     = "INCLUDE_TIME_COLUMNS"
+    INCLUDE_TIME = "INCLUDE_TIME_COLUMNS"
     ADD_TO_PROJECT = "ADD_TO_PROJECT"
     ENCODING = "ENCODING"
 
@@ -475,15 +432,6 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
                 [QgsProcessing.TypeVectorAnyGeometry],  # accepte point/ligne/polygone
             )
         )
-        self.addParameter(
-            QgsProcessingParameterFile(
-                self.MODEL_CSV,
-                self.tr("Modèle CSV DEPOBIO V2 (optionnel, pour obtenir toutes les colonnes)"),
-                behavior=QgsProcessingParameterFile.File,
-                fileFilter="CSV (*.csv)",
-                optional=True
-            )
-        )
         self.addParameter(QgsProcessingParameterProviderConnection(
             self.DB_CONNECTION,
             self.tr("Connexion PostgreSQL (liste des espèces)"),
@@ -544,7 +492,6 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
             raise QgsProcessingException(self.tr("La couche/fichier d'entrée n'est pas valide."))
         
         output_path = self.parameterAsFileOutput(parameters, self.OUTPUT, context)
-        model_csv_path = self.parameterAsFile(parameters, self.MODEL_CSV, context)
         conn_name = self.parameterAsConnectionName(parameters, self.DB_CONNECTION, context)
         add_to_project = self.parameterAsBoolean(parameters, self.ADD_TO_PROJECT, context)
         include_time = self.parameterAsBoolean(parameters, self.INCLUDE_TIME, context)
@@ -576,8 +523,6 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
         # Chargement de la liste des espèces avant modification de la couche
         taxref_lookup = load_species_lookup_from_db(conn_name, self.SPECIES_TABLE_SQL, feedback)
 
-        headers, second_row = read_model_csv_template(model_csv_path, feedback)
-
         # permId : générés et enregistrés dans la couche SOURCE, avant la reprojection
         permid_field = permid_field or "permId"
         self.ensure_perm_ids(layer_obj, permid_field, feedback)
@@ -591,10 +536,6 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
         processed_rows = []
 
         field_names = layer.fields().names()
-
-        # Savoir si 'heureDebut' / 'heureFin' existent dans le modèle
-        model_has_heure_debut = headers and ("heureDebut" in [h.strip() for h in headers])
-        model_has_heure_fin   = headers and ("heureFin"   in [h.strip() for h in headers])
         
         matched = 0
         unmatched_examples = []
@@ -708,10 +649,9 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
                 "typInfGeo": typinfgeo_def
             }
             
-            # Ajouter les heures si le modèle les attend OU si include_time=True (et heure présente)
-            if model_has_heure_debut or (include_time and hh):
+            # Heures : ajoutées si demandé et si une heure est présente
+            if include_time and hh:
                 row["heureDebut"] = hh
-            if model_has_heure_fin or (include_time and hh):
                 row["heureFin"]   = hh
 
             processed_rows.append(row)
@@ -726,34 +666,28 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
         if unmatched_examples:
             feedback.pushWarning("Exemples non joints (10 max) : " + ", ".join(unmatched_examples))
 
-        # En-têtes : modèle CSV (si fourni) ou jeu minimal (avec heures si demandé)
-        if headers:
-            final_headers = headers
-        else:
-            final_headers = [
-                "cdNom", "nomCite",
-                "dateDebut", "dateFin",
-                "denbrMin", "denbrMax",
-                "objDenbr", "typDenbr",
-                "ocEtatBio", "ocSex", "ocStade",
-                "comment",
-                "statObs", "statSource",
-                "geometrie", "natObjGeo", "precisGeo",
-                "permId", "observer", "typInfGeo"
-            ]
-            # insertion des heures après les dates si demandé
-            if include_time:
-                if "heureDebut" not in final_headers:
-                    final_headers.insert(final_headers.index("dateDebut")+1, "heureDebut")
-                if "heureFin" not in final_headers:
-                    final_headers.insert(final_headers.index("dateFin")+1, "heureFin")
+        # En-têtes du fichier de sortie (jeu DEPOBIO minimal)
+        final_headers = [
+            "cdNom", "nomCite",
+            "dateDebut", "dateFin",
+            "denbrMin", "denbrMax",
+            "objDenbr", "typDenbr",
+            "ocEtatBio", "ocSex", "ocStade",
+            "comment",
+            "statObs", "statSource",
+            "geometrie", "natObjGeo", "precisGeo",
+            "permId", "observer", "typInfGeo"
+        ]
+        # insertion des heures après les dates si demandé
+        if include_time:
+            final_headers.insert(final_headers.index("dateDebut") + 1, "heureDebut")
+            final_headers.insert(final_headers.index("dateFin") + 1, "heureFin")
 
         # Choix du format en fonction de l'extension
         ext = os.path.splitext(output_path)[1].lower()
 
-        # si le modèle contient heureDebut/heureFin, les insérer à la bonne place (déjà dans headers)
         if ext == ".csv":
-            self.write_csv(output_path, processed_rows, final_headers, second_row, feedback)
+            self.write_csv(output_path, processed_rows, final_headers, feedback)
             if add_to_project:
                 file_url = QUrl.fromLocalFile(output_path).toString() #Cherche le chemin en local
                 uri = f"{file_url}?encoding={encoding_for_qgis}&delimiter=;&quote=\""
@@ -777,15 +711,13 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
     # ------------------------------------------------------------------------------------
     # --- Écrit fichier CSV
     # ------------------------------------------------------------------------------------
-    def write_csv(self, output_path, processed_rows, headers, second_row, feedback):
+    def write_csv(self, output_path, processed_rows, headers, feedback):
         folder = os.path.dirname(output_path)
         if folder: os.makedirs(folder, exist_ok=True)
         with open(output_path, "w", encoding="utf-8-sig", newline="") as f:
             writer = csv.writer(f, delimiter=";")
             # ligne 1 : champs
             writer.writerow(headers)
-            # ligne 2 : astérisques si modèle fourni
-            if second_row: writer.writerow(second_row)
             for row in processed_rows:
                 out = []
                 for h in headers:
@@ -873,7 +805,6 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
             "<ul>"
             "<li><b>Couche SIG</b> : couche vectorielle contenant les observations</li>"
             "<li><b>Connexion PostgreSQL</b> : connexion QGIS donnant accès à la table <code>appli_terrain_epes.bio_liste_especes</code></li>"
-            "<li><b>Modèle CSV DEPOBIO (optionnel)</b> : permet de garantir l’ordre et la complétude des colonnes</li>"
             "</ul>"
 
             "<h4>Champs attendus dans la couche</h4>"

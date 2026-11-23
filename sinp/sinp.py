@@ -16,11 +16,10 @@ outils Processing ou via un modèle.
 import os, csv, uuid, datetime, re, unicodedata
 import xlsxwriter
 
-from qgis.PyQt.QtCore import QCoreApplication, QUrl
+from qgis.PyQt.QtCore import QCoreApplication, QUrl, QDateTime, QDate
 from qgis.core import (
     QgsProcessingAlgorithm,
     QgsProcessingParameterVectorLayer,
-    QgsProcessingParameterFile,
     QgsProcessingParameterFileDestination,
     QgsProcessingParameterField,
     QgsProcessingParameterString,
@@ -35,9 +34,13 @@ from qgis.core import (
     QgsCoordinateTransform, QgsProject,
     QgsProcessing,
     QgsWkbTypes,
+    QgsDataSourceUri,
+    QgsProviderRegistry,
+    QgsProviderConnectionException,
+    QgsVectorDataProvider,
     NULL
 )
-from PyQt5.QtCore import QVariant
+from qgis.PyQt.QtCore import QVariant
 
 # ------------------------------------------------------------------------------------
 # Fonctions utilitaires
@@ -72,8 +75,8 @@ def is_qgis_null(v):
     return False
 
 # Normalise un nom ou valeur
-"""Convertit en minuscule, supprime espaces superflus."""
 def normalise(value):
+    """Convertit en minuscule, supprime espaces superflus."""
     return (str(value or "").strip().lower())
 
 def normalize_for_match(s: str) -> str:
@@ -109,10 +112,22 @@ def normalize_wkt_type(wkt: str) -> str:
 # Convertir une chaine de txt en date
 def parse_date_time(value):
     """
-    Convertit vers 'DD/MM/YYYY' en supprimant ' (UTC)' et tout contenu entre parenthèses.
+    Convertit vers ('DD/MM/YYYY', 'HH:MM:SS').
+    Accepte : datetime Python, QDateTime/QDate (champs Date/DateTime QGIS),
+    chaînes avec ou sans millisecondes (ex. '2026/04/22 08:21:01.530').
+    Renvoie ("", "") si la valeur est vide ou non interprétable.
     """
-    if value is None:
+    if is_qgis_null(value):
         return "", ""
+    # Types Qt renvoyés par QGIS pour les champs Date / DateTime
+    if isinstance(value, QDateTime):
+        if not value.isValid():
+            return "", ""
+        value = value.toPyDateTime()
+    elif isinstance(value, QDate):
+        if not value.isValid():
+            return "", ""
+        value = value.toPyDate()
     if isinstance(value, datetime.datetime):
         return value.date().strftime("%d/%m/%Y"), value.time().strftime("%H:%M:%S")
     if isinstance(value, datetime.date):
@@ -122,6 +137,9 @@ def parse_date_time(value):
     s = re.sub(r"\s*\(.*?\)\s*", " ", s).strip()
     # essais de formats usuels
     fmts = [
+        # avec millisecondes (QField)
+        "%Y/%m/%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S.%f", "%d/%m/%Y %H:%M:%S.%f",
+        # sans millisecondes
         "%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M",
         "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M",
         "%Y/%m/%d %H:%M:%S", "%Y/%m/%d %H:%M"
@@ -222,95 +240,62 @@ def parse_effectif(value):
 def generate_perm_id():
     return str(uuid.uuid4()).replace("{", "").replace("}", "")
 
-# Récuperer les en-tête d'un fichier CSV
-def read_model_csv_template(csv_path, feedback):
-    """
-    Lit le Modèle CSV officiel (si fourni) :
-    - retourne (headers, second_row) où second_row est la ligne d'astérisques.
-    """
-    if not csv_path or not os.path.isfile(csv_path):
-        return None, None
-    with open(csv_path, "r", encoding="utf-8") as f:
-        # Lecture des 4096 premiers caractères
-        sample = f.read(4096)
-        # Détection auto du séparateur du fichier .CSV
-        try:
-            dialect = csv.Sniffer().sniff(sample, delimiters=";,")
-            sep = dialect.delimiter
-        except Exception:
-            sep = ";"
-    # Lecture complète du CSV avec le séparateur qui a été deviné
-    with open(csv_path, "r", encoding="utf-8") as f:
-        reader = csv.reader(f, delimiter=sep)
-        rows = list(reader)
-    if not rows:
-        return None, None
-    # Extraction et nettoyage de la première ligne (celle des en-têtes)
-    headers = [h.strip() for h in rows[0]]
-    second = rows[1] if len(rows) > 1 else None
-    return headers, second
+# Connexions PostgreSQL de l'utilisateur pointant vers le service ou la base demandés (triées par nom)
+def find_db_connections(service):
+    md = QgsProviderRegistry.instance().providerMetadata("postgres")
+    if md is None:
+        raise QgsProcessingException("Le fournisseur PostgreSQL n'est pas disponible dans cette installation de QGIS.")
+    found = []
+    for name, conn in sorted(md.connections(False).items()):
+        uri = QgsDataSourceUri(conn.uri())
+        if QgsDataSourceUri(conn.uri()).service() == service:
+            found.append((name, conn))
+    return found
 
-# Lecture d'un fichier CSV avec infos TAXREF pour conversion en dictionnaire python
-def load_taxref_lookup(csv_path, feedback):
-    """
-    Charge TAXREF; détecte la colonne clé parmi : nomCite, nomCite_Fr, nomCite_SINP, libelle, espece, taxon
-    et la colonne 'cdNom'.
-    Construit un lookup double : (clé originale normalisée) et (clé sans accents) -> dict.
-    """
-    lookup = {}
-    # Contrôle existence fichier
-    if not csv_path or not os.path.isfile(csv_path):
-        feedback.pushWarning("CSV TAXREF non trouvé. On tentera d'utiliser les colonnes de la couche.")
-        return lookup
+# Lecture de la liste des espèces depuis PostgreSQL pour construire un lookup {libellé normalisé: {cdNom, nomCite}}
+def load_species_lookup_from_db(service, sql, feedback):
+    """Construit le lookup {libellé normalisé: {cdNom, nomCite}} depuis la base dbname."""
+    candidates = find_db_connections(service)
+    if not candidates:
+        raise QgsProcessingException(
+            f"Aucune connexion PostgreSQL utilisant le service « {service} » n'est enregistrée dans QGIS. ")
     
-    encodings_to_try = ["utf-8", "latin-1", "utf-8-sig"]
-    sep = ";"
-    rows = None
-    for enc in encodings_to_try:
+    rows, errors = None, []
+    for name, conn in candidates:
         try:
-            # Détection auto séparateur CSV
-            with open(csv_path, "r", encoding=enc) as f:
-                sample = f.read(4096)
-                try:
-                    dialect = csv.Sniffer().sniff(sample, delimiters=";,")
-                    sep = dialect.delimiter
-                except Exception:
-                    sep = ";"
-            #Lecture du fichier en mode dictionnaire
-            with open(csv_path, "r", encoding=enc) as f:
-                reader = csv.DictReader(f, delimiter=sep)
-                rows = list(reader)
-            feedback.pushInfo(f"Lecture TAXREF avec encodage: {enc} / sep: '{sep}' / lignes: {len(rows)}")
+            rows = conn.executeSql(sql)
+            feedback.pushInfo(f"Liste des espèces lue via la connexion « {name} ».")
             break
-        except Exception as e:
-            feedback.pushWarning(f"Echec lecture TAXREF avec encodage {enc}: {e}")
-            continue
+        except QgsProviderConnectionException as e:
+            # Serveur injoignable / VPN, authentification, droits, table ou colonne absente
+            errors.append(f"- {name} : {e}")
+
+    if rows is None:
+        raise QgsProcessingException(
+            f"Lecture de la liste des espèces impossible (service « {service} ») :\n" + "\n".join(errors))
 
     if not rows:
-        feedback.pushWarning("Impossible de lire le CSV TAXREF (encodage inconnu).")
-        return lookup
+        raise QgsProcessingException(
+            "La table des espèces ne renvoie aucune ligne exploitable (cd_ref renseigné).")
 
-    cols = rows[0].keys()
-    candidates_nom = [c for c in cols if normalise(c) in ("nomcite", "nomcite_fr", "nomcite_sinp", "libelle", "espece", "taxon")]
-    col_nom = candidates_nom[0] if candidates_nom else None
-    col_cd  = next((c for c in cols if normalise(c) == "cdnom"), None)
+    lookup, nb_ambigus = {}, 0
+    for nom, nom_vern, lb_nom, cd_ref in rows:
+        entry = {"cdNom": str(cd_ref), "nomCite": lb_nom or nom}
+        # Clé principale : "nom" = valeur saisie dans QField
+        for key in {normalise(nom), normalize_for_match(nom)} - {""}:
+            prev = lookup.get(key)
+            if prev and prev["cdNom"] != entry["cdNom"]:
+                nb_ambigus += 1
+                continue  # on conserve le premier cd_ref rencontré
+            lookup[key] = entry
+        # Clés secondaires (sans écraser) : vernaculaire seul, nom scientifique
+        for label in (nom_vern, lb_nom):
+            if not is_qgis_null(label):
+                lookup.setdefault(normalize_for_match(label), entry)
 
-    if not col_cd or not col_nom:
-        feedback.pushWarning("Colonnes TAXREF non détectées ('cdNom' et 'nomCite/nomCite_Fr').")
-        return lookup
-
-    # Construction: double clé (originale normalisée + clé de match sans accents)
-    for row in rows:
-        nom_raw = row.get(col_nom)
-        cd = row.get(col_cd)
-        if not nom_raw or not cd:
-            continue
-        key_orig  = normalise(nom_raw)             # ex. 'mésange charbonnière'
-        key_match = normalize_for_match(nom_raw)   # ex. 'mesange charbonniere'
-        lookup[key_orig]  = {"cdNom": cd, "nomCite": row.get("nomCite") or nom_raw}
-        lookup[key_match] = {"cdNom": cd, "nomCite": row.get("nomCite") or nom_raw}
-
-    feedback.pushInfo(f"{len(lookup)} clés TAXREF chargées (accent + normalisé).")
+    feedback.pushInfo(f"{len(rows)} espèces lues depuis la base ({len(lookup)} clés).")
+    if nb_ambigus:
+        feedback.pushInfo(f"{nb_ambigus} libellé(s) homonyme(s) dans la table (premier cd_ref conservé).")
     return lookup
 
 # mapping ocStade selon le guide SINP
@@ -332,9 +317,13 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
 
     INPUT = "INPUT"
     OUTPUT = "OUTPUT"
-    TAXREF_CSV = "TAXREF_CSV"
-    MODEL_CSV = "MODEL_CSV"
-    INCLUDE_TIME     = "INCLUDE_TIME_COLUMNS"
+    SPECIES_SERVICE = "appli"
+    SPECIES_TABLE_SQL = (
+        "SELECT nom, nom_vern, lb_nom, cd_ref "
+        "FROM appli_terrain_epes.bio_liste_especes "
+        "WHERE cd_ref IS NOT NULL"
+    )
+    INCLUDE_TIME = "INCLUDE_TIME_COLUMNS"
     ADD_TO_PROJECT = "ADD_TO_PROJECT"
     ENCODING = "ENCODING"
 
@@ -346,7 +335,6 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
     OCSTADE_FIELD = "OCSTADE_FIELD"
     OCSEX_FIELD = "OCSEX_FIELD"
     COMMENT1_FIELD = "COMMENT1_FIELD"
-    COMMENT2_FIELD = "COMMENT2_FIELD"
     PERMID_FIELD = "PERMID_FIELD"
 
     SIMPLIFY_TOL = "SIMPLIFY_TOL"
@@ -401,6 +389,56 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
         feedback.pushInfo("Reprojection terminée.")
         return new_layer
 
+    # -------------------- Identifiants permanents ------------------------
+    def ensure_perm_ids(self, layer, permid_field, feedback):
+        """
+        Garantit un permId (UUID) sur chaque entité de la couche SOURCE.
+        Les UUID générés sont enregistrés pour rester stables d'un export à l'autre.
+        """
+        provider = layer.dataProvider()
+        caps = provider.capabilities()
+        idx = layer.fields().indexFromName(permid_field)
+
+        # 1. Entités sans permId (toutes si le champ n'existe pas)
+        if idx < 0:
+            missing = [f.id() for f in layer.getFeatures()]
+        else:
+            missing = [f.id() for f in layer.getFeatures() if is_qgis_null(f[permid_field])]
+        if not missing:
+            feedback.pushInfo("Toutes les entités possèdent déjà un permId.")
+            return
+
+        # 2. Contrôles AVANT toute écriture
+        if layer.isEditable():
+            raise QgsProcessingException(
+                "La couche source est en mode édition : enregistrez ou annulez vos "
+                "modifications, quittez le mode édition, puis relancez le traitement.")
+        if not (caps & QgsVectorDataProvider.ChangeAttributeValues):
+            raise QgsProcessingException(
+                f"{len(missing)} entité(s) sans permId mais la couche est en lecture seule"
+                "(format ou droits) : impossible d'enregistrer des permId stables.")
+
+        # 3. Création du champ si absent
+        if idx < 0:
+            if not (caps & QgsVectorDataProvider.AddAttributes) or \
+               not provider.addAttributes([QgsField(permid_field, QVariant.String)]):
+                raise QgsProcessingException(
+                    f"Impossible de créer le champ '{permid_field}' dans la couche source.")
+            layer.updateFields()
+            idx = layer.fields().indexFromName(permid_field)
+            feedback.pushInfo(f"Champ '{permid_field}' créé dans la couche source.")
+
+        # 4. Écriture groupée, validée ou annulée en bloc
+        layer.startEditing()
+        for fid in missing:
+            layer.changeAttributeValue(fid, idx, generate_perm_id())
+        if not layer.commitChanges():
+            errors = "; ".join(layer.commitErrors())
+            layer.rollBack()
+            raise QgsProcessingException(f"Échec de l'enregistrement des permId : {errors}")
+
+        feedback.pushInfo(f"{len(missing)} permId générés et enregistrés dans la couche source.")
+
     # -------------------- Paramètres ------------------------
     def initAlgorithm(self, config):
 
@@ -411,31 +449,13 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
                 [QgsProcessing.TypeVectorAnyGeometry],  # accepte point/ligne/polygone
             )
         )
-        self.addParameter(
-            QgsProcessingParameterFile(
-                self.MODEL_CSV,
-                self.tr("Modèle CSV DEPOBIO V2 (optionnel, pour obtenir toutes les colonnes)"),
-                behavior=QgsProcessingParameterFile.File,
-                fileFilter="CSV (*.csv)",
-                optional=True
-            )
-        )
-        self.addParameter(
-            QgsProcessingParameterFile(
-                self.TAXREF_CSV,
-                self.tr("CSV TAXREF"),
-                behavior=QgsProcessingParameterFile.File,
-                fileFilter="CSV (*.csv)"
-            )
-        )
 
-        self.addParameter(QgsProcessingParameterField(self.SPECIES_FIELD, self.tr("Champ espèce"), parentLayerParameterName=self.INPUT, type=QgsProcessingParameterField.Any, defaultValue="Espece"))
-        self.addParameter(QgsProcessingParameterField(self.DATE_FIELD, self.tr("Champ date/heure"), parentLayerParameterName=self.INPUT, type=QgsProcessingParameterField.Any, defaultValue="Date_heure"))
-        self.addParameter(QgsProcessingParameterField(self.EFFECTIF_FIELD, self.tr("Champ effectif (denbrMax)"), parentLayerParameterName=self.INPUT, type=QgsProcessingParameterField.Any, defaultValue="denbrMax"))
-        self.addParameter(QgsProcessingParameterField(self.OCSTADE_FIELD, self.tr("Champ statut (ocStade)"), parentLayerParameterName=self.INPUT, type=QgsProcessingParameterField.Any, defaultValue="OcStatut", optional=True))
-        self.addParameter(QgsProcessingParameterField(self.OCSEX_FIELD, self.tr("Champ sexe (ocSex)"), parentLayerParameterName=self.INPUT, type=QgsProcessingParameterField.Any, defaultValue="OcSexe", optional=True))
-        self.addParameter(QgsProcessingParameterField(self.COMMENT1_FIELD, self.tr("Champ commentaire 1"), parentLayerParameterName=self.INPUT, type=QgsProcessingParameterField.Any, defaultValue="Remarque1", optional=True))
-        self.addParameter(QgsProcessingParameterField(self.COMMENT2_FIELD, self.tr("Champ commentaire 2"), parentLayerParameterName=self.INPUT, type=QgsProcessingParameterField.Any, defaultValue="Remarque2", optional=True))
+        self.addParameter(QgsProcessingParameterField(self.SPECIES_FIELD, self.tr("Champ espèce"), parentLayerParameterName=self.INPUT, type=QgsProcessingParameterField.Any, defaultValue="espece"))
+        self.addParameter(QgsProcessingParameterField(self.DATE_FIELD, self.tr("Champ date/heure"), parentLayerParameterName=self.INPUT, type=QgsProcessingParameterField.Any, defaultValue="date_heure"))
+        self.addParameter(QgsProcessingParameterField(self.EFFECTIF_FIELD, self.tr("Champ effectif (denbrMax)"), parentLayerParameterName=self.INPUT, type=QgsProcessingParameterField.Any, defaultValue="effectif"))
+        self.addParameter(QgsProcessingParameterField(self.OCSTADE_FIELD, self.tr("Champ statut (ocStade)"), parentLayerParameterName=self.INPUT, type=QgsProcessingParameterField.Any, defaultValue="stade_vie", optional=True))
+        self.addParameter(QgsProcessingParameterField(self.OCSEX_FIELD, self.tr("Champ sexe (ocSex)"), parentLayerParameterName=self.INPUT, type=QgsProcessingParameterField.Any, defaultValue="sexe", optional=True))
+        self.addParameter(QgsProcessingParameterField(self.COMMENT1_FIELD, self.tr("Champ commentaire 1"), parentLayerParameterName=self.INPUT, type=QgsProcessingParameterField.Any, defaultValue="commentaire", optional=True))
         self.addParameter(QgsProcessingParameterField(self.PERMID_FIELD, self.tr("Champ identifiant permanent (permId)"), parentLayerParameterName=self.INPUT, type=QgsProcessingParameterField.Any, defaultValue="permId", optional=True))
         
         self.addParameter(QgsProcessingParameterBoolean(self.INCLUDE_TIME, self.tr("Inclure heureDebut/heureFin si une heure est présente"), defaultValue=True))
@@ -484,8 +504,6 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
             raise QgsProcessingException(self.tr("La couche/fichier d'entrée n'est pas valide."))
         
         output_path = self.parameterAsFileOutput(parameters, self.OUTPUT, context)
-        model_csv_path = self.parameterAsFile(parameters, self.MODEL_CSV, context)
-        taxref_csv_path = self.parameterAsFile(parameters, self.TAXREF_CSV, context)
         add_to_project = self.parameterAsBoolean(parameters, self.ADD_TO_PROJECT, context)
         include_time = self.parameterAsBoolean(parameters, self.INCLUDE_TIME, context)
         drop_zero_autre  = self.parameterAsBoolean(parameters, self.DROP_ZERO_AUTRE, context)
@@ -499,7 +517,6 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
         ocstade_field  = self.parameterAsString(parameters, self.OCSTADE_FIELD, context)
         ocsex_field    = self.parameterAsString(parameters, self.OCSEX_FIELD, context)
         comment1_field = self.parameterAsString(parameters, self.COMMENT1_FIELD, context)
-        comment2_field = self.parameterAsString(parameters, self.COMMENT2_FIELD, context)
         permid_field   = self.parameterAsString(parameters, self.PERMID_FIELD, context)
         observer_def   = self.parameterAsString(parameters, self.OBSERVER_DEFAULT, context)
         precisgeo_def  = int(self.parameterAsInt(parameters, self.PRECISGEO_DEFAULT, context))
@@ -514,29 +531,15 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
 
         simplify_tol = float(self.parameterAsDouble(parameters, self.SIMPLIFY_TOL, context))
 
+        # Chargement de la liste des espèces avant modification de la couche
+        taxref_lookup = load_species_lookup_from_db(self.SPECIES_SERVICE, self.SPECIES_TABLE_SQL, feedback)
+
+        # permId : générés et enregistrés dans la couche SOURCE, avant la reprojection
+        permid_field = permid_field or "permId"
+        self.ensure_perm_ids(layer_obj, permid_field, feedback)
+
         # Reprojection -> EPSG:2154
         layer = self.reproject_to_2154(layer_obj, context, feedback)
-
-        if not layer.isEditable():
-            layer.startEditing()
-
-        
-        # ---------------------------------------------------------
-        # Gestion du champ permId (création si absent)
-        # ---------------------------------------------------------
-
-        permid_field = permid_field or "permId"
-        field_names = layer.fields().names()
-
-        if permid_field not in field_names:
-            feedback.pushInfo(f"Création du champ '{permid_field}' (UUID permanent).")
-            layer.dataProvider().addAttributes([QgsField(permid_field, QVariant.String)])
-            layer.updateFields()
-            field_names = layer.fields().names()  # rafraîchir
-
-
-        taxref_lookup = load_taxref_lookup(taxref_csv_path, feedback)
-        headers, second_row = read_model_csv_template(model_csv_path, feedback)
 
         feedback.pushInfo(f"Lecture du fichier : {layer.source()}")
         feedback.pushInfo(f"Nombre d'entités : {layer.featureCount()}")
@@ -544,16 +547,22 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
         processed_rows = []
 
         field_names = layer.fields().names()
-
-        # Savoir si 'heureDebut' / 'heureFin' existent dans le modèle
-        model_has_heure_debut = headers and ("heureDebut" in [h.strip() for h in headers])
-        model_has_heure_fin   = headers and ("heureFin"   in [h.strip() for h in headers])
         
         matched = 0
         unmatched_examples = []
+        bad_dates = 0
+        seen_permids, dup_permids = set(), 0
+        skipped_empty = 0
+
+        wkb = layer.wkbType()
+        is_point = QgsWkbTypes.geometryType(wkb) == QgsWkbTypes.PointGeometry
 
         for f in layer.getFeatures():
             species_val = f[species_field] if species_field in field_names else None
+            # Entités sans espèce (saisies vides ou abandonnées sur le terrain) : ignorées
+            if is_qgis_null(species_val):
+                skipped_empty += 1
+                continue
             if drop_zero_autre and str(species_val).strip() == "0_autre":
                 continue
 
@@ -578,6 +587,9 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
             # Dates + heure
             date_src = f[date_field] if date_field in field_names else None
             dd, hh = parse_date_time(date_src)
+            if not dd:
+                bad_dates += 1
+                feedback.pushWarning(f"Date non interprétable pour l'entité {f.id()} : '{date_src}'")
             df, hf = dd, hh  # dateFin/heureFin = identiques au début (cf.tuto)
 
 
@@ -601,28 +613,18 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
             if comment1_field in field_names:
                 v1 = f[comment1_field]
                 if v1: comment_parts.append(str(v1))
-            if comment2_field in field_names:
-                v2 = f[comment2_field]
-                if v2: comment_parts.append(str(v2))
             comment = " | ".join(comment_parts)
 
-            # PermID
-            permId_updates = {}  # {fid: permId}
-
-            # Lire la valeur brute
+            # PermID : garanti en amont par ensure_perm_ids, recopié par la reprojection
             raw_val = f[permid_field] if permid_field in field_names else None
-
-            # Si NULL QGIS ou vide → générer un UUID
-            if is_qgis_null(raw_val):
-                permId = generate_perm_id()
-                permId_updates[f.id()] = permId
-            else:
-                permId = str(raw_val).strip()
+            permId = "" if is_qgis_null(raw_val) else str(raw_val).strip()
+            if permId in seen_permids:
+                dup_permids += 1
+                feedback.pushWarning(f"permId en double pour l'entité {f.id()} : {permId}")
+            seen_permids.add(permId)
 
             # Géométrie WKT
             geom = f.geometry()
-            wkb = layer.wkbType()
-            is_point = QgsWkbTypes.geometryType(wkb) == QgsWkbTypes.PointGeometry
 
             if geom and not geom.isNull() and not is_point and simplify_tol > 0:
                 try:
@@ -630,7 +632,7 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
                 except Exception:
                     wkt = geom.asWkt(3)
             else:
-                wkt = geom.asWkt() if geom and not geom.isNull() else ""
+                wkt = geom.asWkt(2) if geom and not geom.isNull() else ""
 
             # 🔧 NORMALISATION WKT (Polygon -> POLYGON, etc.)
             wkt = normalize_wkt_type(wkt)
@@ -658,56 +660,45 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
                 "typInfGeo": typinfgeo_def
             }
             
-            # Ajouter les heures si le modèle les attend OU si include_time=True (et heure présente)
-            if model_has_heure_debut or (include_time and hh):
+            # Heures : ajoutées si demandé et si une heure est présente
+            if include_time and hh:
                 row["heureDebut"] = hh
-            if model_has_heure_fin or (include_time and hh):
                 row["heureFin"]   = hh
 
             processed_rows.append(row)
-        
-        # Appliquer les changements de permId dans la couche
-        if permId_updates:
-            idx = layer.fields().indexFromName(permid_field)
-            for fid, permId in permId_updates.items():
-                layer.changeAttributeValue(fid, idx, permId)
-    
-        # Mettre à jour la couche en mémoire avec les permId générés:
-        if layer.isEditable():
-            layer.commitChanges()
             
-        feedback.pushInfo(f"Jointure TAXREF : {matched} correspondances / {layer.featureCount()} entités.")
+        feedback.pushInfo(f"Jointure TAXREF : {matched} correspondances / {len(processed_rows)} observations exportées.")
+        if bad_dates:
+            feedback.pushWarning(f"{bad_dates} entité(s) avec date non interprétable (dateDebut vide).")
+        if dup_permids:
+            feedback.pushWarning(f"{dup_permids} permId en double : entités probablement dupliquées dans QField.")
+        if skipped_empty:
+            feedback.pushWarning(f"{skipped_empty} entité(s) sans espèce ignorée(s).")
         if unmatched_examples:
             feedback.pushWarning("Exemples non joints (10 max) : " + ", ".join(unmatched_examples))
 
-        # En-têtes : modèle CSV (si fourni) ou jeu minimal (avec heures si demandé)
-        if headers:
-            final_headers = headers
-        else:
-            final_headers = [
-                "cdNom", "nomCite",
-                "dateDebut", "dateFin",
-                "denbrMin", "denbrMax",
-                "objDenbr", "typDenbr",
-                "ocEtatBio", "ocSex", "ocStade",
-                "comment",
-                "statObs", "statSource",
-                "geometrie", "natObjGeo", "precisGeo",
-                "permId", "observer", "typInfGeo"
-            ]
-            # insertion des heures après les dates si demandé
-            if include_time:
-                if "heureDebut" not in final_headers:
-                    final_headers.insert(final_headers.index("dateDebut")+1, "heureDebut")
-                if "heureFin" not in final_headers:
-                    final_headers.insert(final_headers.index("dateFin")+1, "heureFin")
+        # En-têtes du fichier de sortie (jeu DEPOBIO minimal)
+        final_headers = [
+            "cdNom", "nomCite",
+            "dateDebut", "dateFin",
+            "denbrMin", "denbrMax",
+            "objDenbr", "typDenbr",
+            "ocEtatBio", "ocSex", "ocStade",
+            "comment",
+            "statObs", "statSource",
+            "geometrie", "natObjGeo", "precisGeo",
+            "permId", "observer", "typInfGeo"
+        ]
+        # insertion des heures après les dates si demandé
+        if include_time:
+            final_headers.insert(final_headers.index("dateDebut") + 1, "heureDebut")
+            final_headers.insert(final_headers.index("dateFin") + 1, "heureFin")
 
         # Choix du format en fonction de l'extension
         ext = os.path.splitext(output_path)[1].lower()
 
-        # si le modèle contient heureDebut/heureFin, les insérer à la bonne place (déjà dans headers)
         if ext == ".csv":
-            self.write_csv(output_path, processed_rows, final_headers, second_row, feedback)
+            self.write_csv(output_path, processed_rows, final_headers, feedback)
             if add_to_project:
                 file_url = QUrl.fromLocalFile(output_path).toString() #Cherche le chemin en local
                 uri = f"{file_url}?encoding={encoding_for_qgis}&delimiter=;&quote=\""
@@ -731,15 +722,13 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
     # ------------------------------------------------------------------------------------
     # --- Écrit fichier CSV
     # ------------------------------------------------------------------------------------
-    def write_csv(self, output_path, processed_rows, headers, second_row, feedback):
+    def write_csv(self, output_path, processed_rows, headers, feedback):
         folder = os.path.dirname(output_path)
         if folder: os.makedirs(folder, exist_ok=True)
         with open(output_path, "w", encoding="utf-8-sig", newline="") as f:
             writer = csv.writer(f, delimiter=";")
             # ligne 1 : champs
             writer.writerow(headers)
-            # ligne 2 : astérisques si modèle fourni
-            if second_row: writer.writerow(second_row)
             for row in processed_rows:
                 out = []
                 for h in headers:
@@ -787,6 +776,11 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
     # ---Métadonnées
     # ------------------------------------------------------------------------------------
 
+    def flags(self):
+        # Exécution dans le thread principal : l'algorithme modifie la couche
+        # source du projet (permId), ce qui n'est pas sûr depuis un thread secondaire.
+        return super().flags() | QgsProcessingAlgorithm.FlagNoThreading
+
     def name(self):
         return "traitement_donnees_naturaliste_vers_sinp"
 
@@ -813,7 +807,7 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
             "<h4>Principe général</h4>"
             "<ul>"
             "<li>Lecture d’une couche vectorielle (points, lignes ou polygones)</li>"
-            "<li>Jointure avec un fichier <b>TAXREF</b> pour récupérer le <code>cdNom</code></li>"
+            "<li>Jointure avec la table <b>bio_liste_especes</b> (PostgreSQL) pour récupérer le <code>cdNom</code></li>"
             "<li>Normalisation des dates, heures et effectifs</li>"
             "<li>Export au format <b>CSV</b> ou <b>Excel (.xlsx)</b></li>"
             "</ul>"
@@ -821,8 +815,7 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
             "<h4>Données en entrée</h4>"
             "<ul>"
             "<li><b>Couche SIG</b> : couche vectorielle contenant les observations</li>"
-            "<li><b>CSV TAXREF</b> : fichier officiel TAXREF pour la correspondance taxonomique</li>"
-            "<li><b>Modèle CSV DEPOBIO (optionnel)</b> : permet de garantir l’ordre et la complétude des colonnes</li>"
+            "<li><b>Liste des espèces</b> : lue automatiquement dans la table <code>appli_terrain_epes.bio_liste_especes</code> de la base <b>applicatifs</b>, via une connexion PostgreSQL enregistrée dans QGIS (service <code>pg_service.conf</code> ou base <b>applicatifs</b>)</li>"
             "</ul>"
 
             "<h4>Champs attendus dans la couche</h4>"

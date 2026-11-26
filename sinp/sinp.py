@@ -115,6 +115,7 @@ def parse_date_time(value):
     Convertit vers ('DD/MM/YYYY', 'HH:MM:SS').
     Accepte : datetime Python, QDateTime/QDate (champs Date/DateTime QGIS),
     chaînes avec ou sans millisecondes (ex. '2026/04/22 08:21:01.530').
+    Les valeurs portant un fuseau (UTC, +02:00…) sont converties en heure locale.
     Renvoie ("", "") si la valeur est vide ou non interprétable.
     """
     if is_qgis_null(value):
@@ -123,7 +124,7 @@ def parse_date_time(value):
     if isinstance(value, QDateTime):
         if not value.isValid():
             return "", ""
-        value = value.toPyDateTime()
+        value = value.toLocalTime().toPyDateTime()
     elif isinstance(value, QDate):
         if not value.isValid():
             return "", ""
@@ -134,7 +135,7 @@ def parse_date_time(value):
         return value.strftime("%d/%m/%Y"), ""
     s = str(value).strip()
     # nettoyer suffixes comme " (UTC)" ou autres entre parenthèses
-    s = re.sub(r"\s*\(.*?\)\s*", " ", s).strip()
+    s = re.sub(r"\s*\(.*\)\s*$", "", s).strip()
     # essais de formats usuels
     fmts = [
         # avec millisecondes (QField)
@@ -157,9 +158,11 @@ def parse_date_time(value):
             return d.strftime("%d/%m/%Y"), ""
         except Exception:
             pass
-    # ISO
+    # ISO (ex. '2026-05-21T08:38:23Z' ou '...+02:00') : converti en heure locale
     try:
-        dt = datetime.datetime.fromisoformat(s)
+        dt = datetime.datetime.fromisoformat(re.sub(r"Z$", "+00:00", s))
+        if dt.tzinfo is not None:
+            dt = dt.astimezone().replace(tzinfo=None)
         return dt.date().strftime("%d/%m/%Y"), dt.time().strftime("%H:%M:%S")
     except Exception:
         return "", ""
@@ -323,11 +326,25 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
         "FROM appli_terrain_epes.bio_liste_especes "
         "WHERE cd_ref IS NOT NULL"
     )
-    INCLUDE_TIME = "INCLUDE_TIME_COLUMNS"
     ADD_TO_PROJECT = "ADD_TO_PROJECT"
     ENCODING = "ENCODING"
 
     EFFECTIF_DUP_MIN_TO_MAX = "EFFECTIF_DUPLICATE_MIN_TO_MAX"  # option UX pour >n
+    EFFECTIF_DEFAULT = "EFFECTIF_DEFAULT"
+
+    # Colonnes par défauts du fichier type DEPOBIO, dans l'ordre attendu (57 colonnes)
+    DEPOBIO_COLUMNS = (
+        "altMax", "altMin", "cdNom", "cdCommune", "cdDept", "cdHab", "cdMaille10",
+        "comment", "dateCtrl", "dateDebut", "dateFin", "denbrMax", "denbrMin",
+        "detminer", "effEch", "geometrie", "heureDebut", "heureFin", "idOrigine",
+        "permId", "permIdGrp", "X", "Y", "methGrp", "natObjGeo", "nomCite",
+        "nomLieu", "nivVal", "objDenbr", "obsCtx", "obsDescr", "observer",
+        "obsTech", "OccComp", "ocEtatBio", "ocMethDet", "ocNat", "ocSex",
+        "ocStade", "ocBiogeo", "ocStatBio", "precisGeo", "preuveOui",
+        "preuvNoNum", "profMax", "profMin", "refBiblio", "statObs", "statSource",
+        "tailleEch", "techEch", "typDenbr", "typInfGeo", "typGrp", "uniteTail",
+        "uRLPreuve", "validateur",
+    )
 
     SPECIES_FIELD = "SPECIES_FIELD"
     DATE_FIELD = "DATE_FIELD"
@@ -458,13 +475,13 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
         self.addParameter(QgsProcessingParameterField(self.COMMENT1_FIELD, self.tr("Champ commentaire 1"), parentLayerParameterName=self.INPUT, type=QgsProcessingParameterField.Any, defaultValue="commentaire", optional=True))
         self.addParameter(QgsProcessingParameterField(self.PERMID_FIELD, self.tr("Champ identifiant permanent (permId)"), parentLayerParameterName=self.INPUT, type=QgsProcessingParameterField.Any, defaultValue="permId", optional=True))
         
-        self.addParameter(QgsProcessingParameterBoolean(self.INCLUDE_TIME, self.tr("Inclure heureDebut/heureFin si une heure est présente"), defaultValue=True))
-
         self.addParameter(QgsProcessingParameterNumber(self.SIMPLIFY_TOL, self.tr("Tolérance de simplification (m) – lignes/polygones"),
                                                        type=QgsProcessingParameterNumber.Double, defaultValue=15.0))
         self.addParameter(QgsProcessingParameterBoolean(self.DROP_ZERO_AUTRE, self.tr("Supprimer les observations '0_autre'"), defaultValue=True))
         
         self.addParameter(QgsProcessingParameterBoolean(self.EFFECTIF_DUP_MIN_TO_MAX,self.tr("Si seule une borne min est connue (>n), dupliquer min vers max"),defaultValue=True))
+        self.addParameter(QgsProcessingParameterNumber(self.EFFECTIF_DEFAULT, self.tr("Effectif par défaut si le champ est vide (0 = laisser vide)"),
+                                                       type=QgsProcessingParameterNumber.Integer, defaultValue=1, minValue=0))
 
         # valeurs par défaut
         self.addParameter(QgsProcessingParameterString(self.OBSERVER_DEFAULT, self.tr("observer (défaut)"), defaultValue="ANONYME (INDDIGO)"))
@@ -505,9 +522,9 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
         
         output_path = self.parameterAsFileOutput(parameters, self.OUTPUT, context)
         add_to_project = self.parameterAsBoolean(parameters, self.ADD_TO_PROJECT, context)
-        include_time = self.parameterAsBoolean(parameters, self.INCLUDE_TIME, context)
         drop_zero_autre  = self.parameterAsBoolean(parameters, self.DROP_ZERO_AUTRE, context)
         dup_min_to_max = self.parameterAsBoolean(parameters, self.EFFECTIF_DUP_MIN_TO_MAX, context)
+        eff_defaut = self.parameterAsInt(parameters, self.EFFECTIF_DEFAULT, context)
 
         # Paramètres champs
         encoding_for_qgis = self.parameterAsString(parameters, self.ENCODING, context) or "UTF-8"
@@ -551,6 +568,7 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
         matched = 0
         unmatched_examples = []
         bad_dates = 0
+        nb_eff_defaut = 0
         seen_permids, dup_permids = set(), 0
         skipped_empty = 0
 
@@ -595,9 +613,14 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
 
             # Effectif
             eff_val = f[eff_field] if eff_field in field_names else None
-            min_eff, max_eff = parse_effectif(eff_val)
-            if min_eff is None and max_eff is None:
-                feedback.pushWarning(f"Effectif non interprétable pour l'entité {f.id()}: '{eff_val}'")
+            eff_par_defaut = eff_defaut > 0 and (is_qgis_null(eff_val) or not str(eff_val).strip())
+            if eff_par_defaut:
+                min_eff = max_eff = eff_defaut
+                nb_eff_defaut += 1
+            else:
+                min_eff, max_eff = parse_effectif(eff_val)
+                if min_eff is None and max_eff is None:
+                    feedback.pushWarning(f"Effectif non interprétable pour l'entité {f.id()}: '{eff_val}'")
 
             # UX : si seule borne min connue (>n), dupliquer min->max si param activé
             if min_eff is not None and max_eff is None and dup_min_to_max:
@@ -613,6 +636,8 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
             if comment1_field in field_names:
                 v1 = f[comment1_field]
                 if v1: comment_parts.append(str(v1))
+            if eff_par_defaut:
+                comment_parts.append(f"Effectif non renseigné, valeur par défaut : {eff_defaut}")
             comment = " | ".join(comment_parts)
 
             # PermID : garanti en amont par ensure_perm_ids, recopié par la reprojection
@@ -659,17 +684,14 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
                 "observer": observer_def,
                 "typInfGeo": typinfgeo_def
             }
-            
-            # Heures : ajoutées si demandé et si une heure est présente
-            if include_time and hh:
-                row["heureDebut"] = hh
-                row["heureFin"]   = hh
 
             processed_rows.append(row)
             
         feedback.pushInfo(f"Jointure TAXREF : {matched} correspondances / {len(processed_rows)} observations exportées.")
         if bad_dates:
             feedback.pushWarning(f"{bad_dates} entité(s) avec date non interprétable (dateDebut vide).")
+        if nb_eff_defaut:
+            feedback.pushInfo(f"{nb_eff_defaut} entité(s) sans effectif : valeur par défaut {eff_defaut} appliquée.")
         if dup_permids:
             feedback.pushWarning(f"{dup_permids} permId en double : entités probablement dupliquées dans QField.")
         if skipped_empty:
@@ -677,22 +699,8 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
         if unmatched_examples:
             feedback.pushWarning("Exemples non joints (10 max) : " + ", ".join(unmatched_examples))
 
-        # En-têtes du fichier de sortie (jeu DEPOBIO minimal)
-        final_headers = [
-            "cdNom", "nomCite",
-            "dateDebut", "dateFin",
-            "denbrMin", "denbrMax",
-            "objDenbr", "typDenbr",
-            "ocEtatBio", "ocSex", "ocStade",
-            "comment",
-            "statObs", "statSource",
-            "geometrie", "natObjGeo", "precisGeo",
-            "permId", "observer", "typInfGeo"
-        ]
-        # insertion des heures après les dates si demandé
-        if include_time:
-            final_headers.insert(final_headers.index("dateDebut") + 1, "heureDebut")
-            final_headers.insert(final_headers.index("dateFin") + 1, "heureFin")
+        # En-têtes du fichier de sortie : toutes les colonnes du fichier type DEPOBIO (vides si non renseignées)
+        final_headers = list(self.DEPOBIO_COLUMNS)
 
         # Choix du format en fonction de l'extension
         ext = os.path.splitext(output_path)[1].lower()
@@ -841,6 +849,7 @@ class MappingNaturalistDataToSinpAlgorithm(QgsProcessingAlgorithm):
             "<code>3</code>, <code>2-4</code>, <code>>5</code>, <code><10</code>, "
             "<code>≈3</code>, etc. "
             "Les valeurs sont converties automatiquement en <code>denbrMin</code> et <code>denbrMax</code>."
+            " Un effectif vide prend la valeur par défaut définie dans les paramètres (1 par défaut, 0 pour désactiver), avec une mention dans <code>comment</code>."
             "</p>"
 
             "<h4>Paramètres par défaut</h4>"
